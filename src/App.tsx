@@ -290,7 +290,21 @@ export const App: React.FC = () => {
             setActiveUserId(session.user.id);
             await fetchUserShop(session.user.id);
           } else {
-            console.log('[AUTH DEBUG] No active session found on initialization');
+            console.log('[AUTH DEBUG] No active Supabase OAuth session found on initialization');
+            const devUserRaw = localStorage.getItem('smart_khata_dev_user');
+            if (devUserRaw) {
+              try {
+                const devUser = JSON.parse(devUserRaw);
+                if (devUser.id) {
+                  console.log(`[AUTH DEBUG] Restoring Development OTP user session: ${devUser.id}`);
+                  setActiveUserId(devUser.id);
+                  await fetchUserShop(devUser.id);
+                  return;
+                }
+              } catch {
+                // Ignore invalid dev user JSON
+              }
+            }
             const savedLang = localStorage.getItem('smart_khata_lang');
             if (savedLang) {
               setScreen((prev) => (prev === 'main' ? 'phone_auth' : prev));
@@ -581,6 +595,8 @@ export const App: React.FC = () => {
             loadSupabaseData(data.id);
             return;
           }
+        } else if (activeUserId || localStorage.getItem('smart_khata_dev_user')) {
+          console.log('[DEV AUTH DEBUG] Creating shop locally for Development OTP mode session');
         } else {
           alert('Session expired. Please sign in again.');
           return;
@@ -692,6 +708,8 @@ export const App: React.FC = () => {
             alert('Your shop account could not be resolved from database. Please sign in again.');
             return;
           }
+        } else if (activeUserId || localStorage.getItem('smart_khata_dev_user')) {
+          console.log('[DEV AUTH DEBUG] Using local shop ID for transaction in Development OTP mode');
         } else {
           alert('Session expired. Please sign in again.');
           return;

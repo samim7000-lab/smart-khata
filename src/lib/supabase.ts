@@ -1,17 +1,38 @@
 import { createClient } from '@supabase/supabase-js';
 import { Customer, Shop, Transaction } from '../types';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const cleanUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const cleanKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey && !supabaseUrl.includes('your-project-id'));
+export const isSupabaseConfigured = Boolean(
+  cleanUrl &&
+  cleanKey &&
+  cleanUrl.startsWith('http') &&
+  !cleanUrl.includes('your-project-id') &&
+  cleanKey !== 'your-anon-key-here' &&
+  cleanKey !== 'undefined' &&
+  cleanKey.length > 20
+);
 
 export const authMode = import.meta.env.VITE_AUTH_MODE || (import.meta.env.VITE_DEV_MODE === 'false' ? 'production' : 'development');
 export const isDevAuth = authMode === 'development';
 export const isDevMode = isDevAuth;
 
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(cleanUrl, cleanKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storageKey: 'smart_khata_supabase_auth_token',
+        storage: window.localStorage,
+      },
+      global: {
+        headers: {
+          apikey: cleanKey,
+        },
+      },
+    })
   : null;
 
 // --- LOCAL MOCK DATABASE FOR INSTANT PREVIEW AND DEMO ---
