@@ -90,17 +90,23 @@ ${t.receipt_thank_you} - ${shop.owner_name}`;
 
   const waUrl = getWhatsAppUrl(customer.phone_number, receiptText, shop.country || 'IN');
 
-  // Generate Ultra High Resolution Image via html2canvas (Scale: 3 for crisp readability)
+  // Generate Ultra High Resolution Image via html2canvas (Dynamic Scale: 3.5 for pin-sharp text & Bengali clarity)
   const generateCanvasFile = async (): Promise<File | null> => {
     if (!receiptRef.current) return null;
     try {
+      const dpr = typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
+      const targetScale = Math.max(3.5, dpr * 2);
+
       const canvas = await html2canvas(receiptRef.current, {
-        scale: 3,
+        scale: targetScale,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         logging: false,
+        imageTimeout: 15000,
+        removeContainer: true,
       } as any);
+
       return new Promise((resolve) => {
         canvas.toBlob((blob) => {
           if (!blob) {
@@ -113,7 +119,7 @@ ${t.receipt_thank_you} - ${shop.owner_name}`;
             { type: 'image/png' }
           );
           resolve(file);
-        }, 'image/png');
+        }, 'image/png', 1.0);
       });
     } catch (err) {
       console.error('Failed to generate receipt image:', err);
@@ -243,6 +249,7 @@ ${t.receipt_thank_you} - ${shop.owner_name}`;
               <img
                 src={shop.logo_url}
                 alt="Shop Logo"
+                crossOrigin="anonymous"
                 className="w-20 h-20 max-h-20 object-contain rounded-2xl mx-auto mb-2 p-1 border border-slate-200 bg-white shadow-xs"
               />
             )}
@@ -389,6 +396,7 @@ ${t.receipt_thank_you} - ${shop.owner_name}`;
                 <img
                   src={shop.signature_url}
                   alt="Signature"
+                  crossOrigin="anonymous"
                   className="h-9 object-contain ml-auto"
                 />
                 <p className="text-[9px] text-slate-400 font-bold mt-0.5">Authorized Signature</p>

@@ -27,15 +27,20 @@ export const printTransactionReceiptPDF = (
     <!DOCTYPE html>
     <html>
       <head>
+        <meta charset="utf-8">
         <title>Receipt - ${customer.display_label} - Smart Khata</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700&family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
         <style>
           body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', 'Hind Siliguri', 'Segoe UI', -apple-system, sans-serif;
             padding: 24px;
             color: #0f172a;
             background: #ffffff;
             max-width: 600px;
             margin: 0 auto;
+            -webkit-font-smoothing: antialiased;
           }
           .header {
             text-align: center;
@@ -246,15 +251,20 @@ export const printCustomerStatementPDF = (
     <!DOCTYPE html>
     <html>
       <head>
+        <meta charset="utf-8">
         <title>Account Statement - ${customer.display_label} - Smart Khata</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700&family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
         <style>
           body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', 'Hind Siliguri', 'Segoe UI', -apple-system, sans-serif;
             padding: 24px;
             color: #0f172a;
             background: #ffffff;
             max-width: 800px;
             margin: 0 auto;
+            -webkit-font-smoothing: antialiased;
           }
           .header {
             display: flex;
@@ -435,15 +445,20 @@ export const printMonthlyBusinessReportPDF = (
     <!DOCTYPE html>
     <html>
       <head>
+        <meta charset="utf-8">
         <title>Business Report - ${shop.shop_name} - Smart Khata</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700&family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
         <style>
           body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', 'Hind Siliguri', 'Segoe UI', -apple-system, sans-serif;
             padding: 24px;
             color: #0f172a;
             background: #ffffff;
             max-width: 800px;
             margin: 0 auto;
+            -webkit-font-smoothing: antialiased;
           }
           .header {
             display: flex;
