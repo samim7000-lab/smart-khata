@@ -44,6 +44,9 @@ const isValidUuid = (val?: string | null): boolean => {
 };
 
 export const App: React.FC = () => {
+  // Guard to prevent concurrent/duplicate transaction saves
+  const isSavingTxRef = React.useRef(false);
+
   // Auth Session Initialization State (Prevents race conditions on Google OAuth redirect)
   const [isAuthInitializing, setIsAuthInitializing] = useState<boolean>(true);
 
@@ -684,210 +687,215 @@ export const App: React.FC = () => {
     gstDetails?: any,
     ledgerPhotoUrl?: string
   ) => {
-    if (!shop) return;
+    if (!shop || isSavingTxRef.current) return;
+    isSavingTxRef.current = true;
 
-    let activeShop = shop;
+    try {
+      let activeShop = shop;
 
-    // Pre-flight validation: Ensure shop.id is a valid PostgreSQL UUID
-    if (isSupabaseConfigured && supabase) {
-      if (!isValidUuid(activeShop.id)) {
-        console.warn(`[REAL AUTH DEBUG] shop.id "${activeShop.id}" is not a valid UUID. Resolving real shop...`);
-        const { data: authUser } = await supabase.auth.getUser();
-        if (authUser?.user) {
-          const { data: dbShop } = await supabase
-            .from('shops')
-            .select('*')
-            .eq('owner_id', authUser.user.id)
-            .maybeSingle();
+      // Pre-flight validation: Ensure shop.id is a valid PostgreSQL UUID
+      if (isSupabaseConfigured && supabase) {
+        if (!isValidUuid(activeShop.id)) {
+          console.warn(`[REAL AUTH DEBUG] shop.id "${activeShop.id}" is not a valid UUID. Resolving real shop...`);
+          const { data: authUser } = await supabase.auth.getUser();
+          if (authUser?.user) {
+            const { data: dbShop } = await supabase
+              .from('shops')
+              .select('*')
+              .eq('owner_id', authUser.user.id)
+              .maybeSingle();
 
-          if (dbShop && isValidUuid(dbShop.id)) {
-            console.log(`[REAL AUTH DEBUG] Successfully re-resolved valid shop UUID: ${dbShop.id}`);
-            setShop(dbShop);
-            activeShop = dbShop;
+            if (dbShop && isValidUuid(dbShop.id)) {
+              console.log(`[REAL AUTH DEBUG] Successfully re-resolved valid shop UUID: ${dbShop.id}`);
+              setShop(dbShop);
+              activeShop = dbShop;
+            } else {
+              alert('Your shop account could not be resolved from database. Please sign in again.');
+              return;
+            }
+          } else if (activeUserId || localStorage.getItem('smart_khata_dev_user')) {
+            console.log('[DEV AUTH DEBUG] Using local shop ID for transaction in Development OTP mode');
           } else {
-            alert('Your shop account could not be resolved from database. Please sign in again.');
+            alert('Session expired. Please sign in again.');
             return;
           }
-        } else if (activeUserId || localStorage.getItem('smart_khata_dev_user')) {
-          console.log('[DEV AUTH DEBUG] Using local shop ID for transaction in Development OTP mode');
-        } else {
-          alert('Session expired. Please sign in again.');
-          return;
         }
       }
-    }
 
-    let finalCustId = customerId;
-    let targetCustomer: Customer | undefined;
+      let finalCustId = customerId;
+      let targetCustomer: Customer | undefined;
 
-    // 1. Handle Inline Customer Creation
-    if (newCustomerData) {
-      if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
-        try {
-          console.log(`[REAL AUTH DEBUG] Inserting Customer into Supabase DB for shop_id: ${activeShop.id}`);
-          const custPayload: any = {
-            shop_id: activeShop.id,
+      // 1. Handle Inline Customer Creation
+      if (newCustomerData) {
+        if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
+          try {
+            console.log(`[REAL AUTH DEBUG] Inserting Customer into Supabase DB for shop_id: ${activeShop.id}`);
+            const custPayload: any = {
+              shop_id: activeShop.id,
+              name: newCustomerData.name,
+              phone_number: newCustomerData.phone,
+              display_label: newCustomerData.displayLabel,
+            };
+            if (newCustomerData.state && newCustomerData.state.trim()) {
+              custPayload.state = newCustomerData.state.trim();
+            }
+
+            const { data, error } = await supabase
+              .from('customers')
+              .insert(custPayload)
+              .select()
+              .single();
+
+            if (error) throw error;
+            if (data) {
+              console.log(`[REAL AUTH DEBUG] Customer inserted successfully into DB. ID: ${data.id}`);
+              finalCustId = data.id;
+              targetCustomer = data;
+            }
+          } catch (err: any) {
+            console.error('[REAL AUTH DEBUG] Supabase customer insert error:', err);
+            alert('Failed to add customer to database: ' + err.message);
+            return;
+          }
+        } else {
+          const newCust: Customer = {
+            id: `cust-${Date.now()}`,
+            shop_id: shop.id,
             name: newCustomerData.name,
             phone_number: newCustomerData.phone,
             display_label: newCustomerData.displayLabel,
+            state: newCustomerData.state,
+            created_at: new Date().toISOString(),
+            balance: 0,
           };
-          if (newCustomerData.state && newCustomerData.state.trim()) {
-            custPayload.state = newCustomerData.state.trim();
-          }
-
-          const { data, error } = await supabase
-            .from('customers')
-            .insert(custPayload)
-            .select()
-            .single();
-
-          if (error) throw error;
-          if (data) {
-            console.log(`[REAL AUTH DEBUG] Customer inserted successfully into DB. ID: ${data.id}`);
-            finalCustId = data.id;
-            targetCustomer = data;
-          }
-        } catch (err: any) {
-          console.error('[REAL AUTH DEBUG] Supabase customer insert error:', err);
-          alert('Failed to add customer to database: ' + err.message);
-          return;
+          finalCustId = newCust.id;
+          targetCustomer = newCust;
+          const updatedCusts = [...customers, newCust];
+          setCustomers(updatedCusts);
+          saveMockCustomers(updatedCusts);
         }
       } else {
-        const newCust: Customer = {
-          id: `cust-${Date.now()}`,
-          shop_id: shop.id,
-          name: newCustomerData.name,
-          phone_number: newCustomerData.phone,
-          display_label: newCustomerData.displayLabel,
-          state: newCustomerData.state,
-          created_at: new Date().toISOString(),
-          balance: 0,
-        };
-        finalCustId = newCust.id;
-        targetCustomer = newCust;
-        const updatedCusts = [...customers, newCust];
-        setCustomers(updatedCusts);
-        saveMockCustomers(updatedCusts);
+        targetCustomer = customers.find((c) => c.id === customerId);
       }
-    } else {
-      targetCustomer = customers.find((c) => c.id === customerId);
-    }
 
-    if (!targetCustomer) return;
+      if (!targetCustomer) return;
 
-    // 2. Save Transaction
-    let savedTx: Transaction | null = null;
-    const txGstPayload = gstDetails
-      ? {
-          base_amount: gstDetails.baseAmount,
-          tax_amount: gstDetails.taxAmount,
-          total_amount: gstDetails.totalAmount,
-          gst_rate: gstDetails.gstRate,
-          cgst_amount: gstDetails.cgstAmount,
-          sgst_amount: gstDetails.sgstAmount,
-          igst_amount: gstDetails.igstAmount,
-          tax_type: gstDetails.taxType,
-        }
-      : {};
+      // 2. Save Transaction
+      let savedTx: Transaction | null = null;
+      const txGstPayload = gstDetails
+        ? {
+            base_amount: gstDetails.baseAmount,
+            tax_amount: gstDetails.taxAmount,
+            total_amount: gstDetails.totalAmount,
+            gst_rate: gstDetails.gstRate,
+            cgst_amount: gstDetails.cgstAmount,
+            sgst_amount: gstDetails.sgstAmount,
+            igst_amount: gstDetails.igstAmount,
+            tax_type: gstDetails.taxType,
+          }
+        : {};
 
-    if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
-      try {
-        console.log(`[REAL AUTH DEBUG] Inserting Transaction into Supabase DB for shop_id: ${activeShop.id}, customer_id: ${finalCustId}`);
-        const txPayload: any = {
-          shop_id: activeShop.id,
-          customer_id: finalCustId,
-          type,
-          amount,
-          note: note || '',
-          ...txGstPayload,
-        };
+      if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
+        try {
+          console.log(`[REAL AUTH DEBUG] Inserting Transaction into Supabase DB for shop_id: ${activeShop.id}, customer_id: ${finalCustId}`);
+          const txPayload: any = {
+            shop_id: activeShop.id,
+            customer_id: finalCustId,
+            type,
+            amount,
+            note: note || '',
+            ...txGstPayload,
+          };
 
-        if (ledgerPhotoUrl && ledgerPhotoUrl.trim()) {
-          txPayload.ledger_photo_url = ledgerPhotoUrl.trim();
-        }
+          if (ledgerPhotoUrl && ledgerPhotoUrl.trim()) {
+            txPayload.ledger_photo_url = ledgerPhotoUrl.trim();
+          }
 
-        let { data, error } = await supabase
-          .from('transactions')
-          .insert(txPayload)
-          .select()
-          .single();
-
-        // Fallback if PostgREST schema cache does not have ledger_photo_url column yet
-        if (error && (error.message?.includes('schema cache') || error.code === 'PGRST204')) {
-          console.warn('[REAL AUTH DEBUG] ledger_photo_url not in schema cache. Retrying transaction insert...');
-          delete txPayload.ledger_photo_url;
-          const retryResult = await supabase
+          let { data, error } = await supabase
             .from('transactions')
             .insert(txPayload)
             .select()
             .single();
 
-          data = retryResult.data;
-          error = retryResult.error;
-        }
+          // Fallback if PostgREST schema cache does not have ledger_photo_url column yet
+          if (error && (error.message?.includes('schema cache') || error.code === 'PGRST204')) {
+            console.warn('[REAL AUTH DEBUG] ledger_photo_url not in schema cache. Retrying transaction insert...');
+            delete txPayload.ledger_photo_url;
+            const retryResult = await supabase
+              .from('transactions')
+              .insert(txPayload)
+              .select()
+              .single();
 
-        if (error) throw error;
-        if (data) {
-          console.log(`[REAL AUTH DEBUG] Transaction inserted successfully into DB. ID: ${data.id}`);
-          savedTx = data;
+            data = retryResult.data;
+            error = retryResult.error;
+          }
+
+          if (error) throw error;
+          if (data) {
+            console.log(`[REAL AUTH DEBUG] Transaction inserted successfully into DB. ID: ${data.id}`);
+            savedTx = data;
+          }
+        } catch (err: any) {
+          console.error('[REAL AUTH DEBUG] Supabase transaction insert error:', err);
+          alert('Failed to save transaction: ' + err.message);
+          return;
         }
-      } catch (err: any) {
-        console.error('[REAL AUTH DEBUG] Supabase transaction insert error:', err);
-        alert('Failed to save transaction: ' + err.message);
-        return;
+      } else {
+        savedTx = {
+          id: `tx-${Date.now()}`,
+          shop_id: activeShop.id,
+          customer_id: finalCustId,
+          type,
+          amount,
+          note,
+          ledger_photo_url: ledgerPhotoUrl,
+          created_at: new Date().toISOString(),
+          ...txGstPayload,
+        };
+        const updatedTxs = [savedTx, ...transactions];
+        setTransactions(updatedTxs);
+        saveMockTransactions(updatedTxs);
       }
-    } else {
-      savedTx = {
-        id: `tx-${Date.now()}`,
-        shop_id: activeShop.id,
-        customer_id: finalCustId,
-        type,
-        amount,
-        note,
-        ledger_photo_url: ledgerPhotoUrl,
-        created_at: new Date().toISOString(),
-        ...txGstPayload,
-      };
-      const updatedTxs = [savedTx, ...transactions];
-      setTransactions(updatedTxs);
-      saveMockTransactions(updatedTxs);
+
+      if (!savedTx) return;
+
+      // Refresh state
+      if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
+        await loadSupabaseData(activeShop.id);
+        const updatedCust = customers.find((c) => c.id === finalCustId) || targetCustomer;
+        setReceiptModalData({
+          tx: savedTx,
+          customer: updatedCust,
+        });
+      } else {
+        const allCusts = customers.some((c) => c.id === targetCustomer?.id)
+          ? customers
+          : [...customers, targetCustomer];
+
+        const updatedCustList = allCusts.map((c) => {
+          if (c.id === finalCustId) {
+            const currentBal = c.balance || 0;
+            const newBal = type === 'credit_given' ? currentBal + amount : currentBal - amount;
+            return { ...c, balance: newBal };
+          }
+          return c;
+        });
+
+        setCustomers(updatedCustList);
+        saveMockCustomers(updatedCustList);
+
+        const latestCustomerState = updatedCustList.find((c) => c.id === finalCustId) || targetCustomer;
+        setReceiptModalData({
+          tx: savedTx,
+          customer: latestCustomerState,
+        });
+      }
+
+      setIsAddTxOpen(false);
+    } finally {
+      isSavingTxRef.current = false;
     }
-
-    if (!savedTx) return;
-
-    // Refresh state
-    if (isSupabaseConfigured && supabase) {
-      await loadSupabaseData(activeShop.id);
-      const updatedCust = customers.find((c) => c.id === finalCustId) || targetCustomer;
-      setReceiptModalData({
-        tx: savedTx,
-        customer: updatedCust,
-      });
-    } else {
-      const allCusts = customers.some((c) => c.id === targetCustomer?.id)
-        ? customers
-        : [...customers, targetCustomer];
-
-      const updatedCustList = allCusts.map((c) => {
-        if (c.id === finalCustId) {
-          const currentBal = c.balance || 0;
-          const newBal = type === 'credit_given' ? currentBal + amount : currentBal - amount;
-          return { ...c, balance: newBal };
-        }
-        return c;
-      });
-
-      setCustomers(updatedCustList);
-      saveMockCustomers(updatedCustList);
-
-      const latestCustomerState = updatedCustList.find((c) => c.id === finalCustId) || targetCustomer;
-      setReceiptModalData({
-        tx: savedTx,
-        customer: latestCustomerState,
-      });
-    }
-
-    setIsAddTxOpen(false);
   };
 
   // Reversible Void Audit Entry Handler

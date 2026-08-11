@@ -56,11 +56,11 @@ export const AddTransactionModal: React.FC<Props> = ({
   const [newState, setNewState] = useState('');
   const [duplicateWarning, setDuplicateWarning] = useState('');
 
-  // Transaction Details State
   const [txType, setTxType] = useState<TransactionType>('credit_given');
   const [amountStr, setAmountStr] = useState('');
   const [note, setNote] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // GST State
   const [gstRate, setGstRate] = useState<number>(shop.default_gst_rate || 18);
@@ -157,7 +157,8 @@ export const AddTransactionModal: React.FC<Props> = ({
   };
 
   const handleSaveTransaction = () => {
-    if (!selectedCustomer || enteredVal <= 0) return;
+    if (!selectedCustomer || enteredVal <= 0 || isSubmitting) return;
+    setIsSubmitting(true);
 
     let newCustPayload;
     if (selectedCustomer.id.startsWith('temp-')) {
@@ -479,7 +480,7 @@ export const AddTransactionModal: React.FC<Props> = ({
               {/* Save Button */}
               <button
                 type="button"
-                disabled={enteredVal <= 0}
+                disabled={enteredVal <= 0 || isSubmitting}
                 onClick={handleSaveTransaction}
                 className={`w-full py-4 font-extrabold text-lg rounded-2xl shadow-xl flex items-center justify-center space-x-2 transition-all active:scale-[0.98] ${
                   txType === 'credit_given'
