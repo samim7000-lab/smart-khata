@@ -310,7 +310,7 @@ export const App: React.FC = () => {
             }
             const savedLang = localStorage.getItem('smart_khata_lang');
             if (savedLang) {
-              setScreen((prev) => (prev === 'main' || prev === 'customer_detail' ? 'welcome' : prev));
+              setScreen((prev) => (prev === 'main' || prev === 'customer_detail' ? 'language_select' : prev));
             }
           }
         } catch (err) {
@@ -342,7 +342,7 @@ export const App: React.FC = () => {
             setShop(null);
             setCustomers([]);
             setTransactions([]);
-            setScreen('welcome');
+            setScreen('language_select');
             setIsAuthInitializing(false);
           }
         });
@@ -997,7 +997,7 @@ export const App: React.FC = () => {
     // Explicitly preserve saved language preference across logouts
     localStorage.setItem('smart_khata_lang', currentLang);
     setLanguage(currentLang);
-    setScreen('welcome');
+    setScreen('language_select');
   };
 
   const handleDeleteAccount = async () => {
