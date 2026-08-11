@@ -722,7 +722,7 @@ export const App: React.FC = () => {
 
     // 1. Handle Inline Customer Creation
     if (newCustomerData) {
-      if (isSupabaseConfigured && supabase) {
+      if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
         try {
           console.log(`[REAL AUTH DEBUG] Inserting Customer into Supabase DB for shop_id: ${activeShop.id}`);
           const custPayload: any = {
@@ -790,7 +790,7 @@ export const App: React.FC = () => {
         }
       : {};
 
-    if (isSupabaseConfigured && supabase) {
+    if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
       try {
         console.log(`[REAL AUTH DEBUG] Inserting Transaction into Supabase DB for shop_id: ${activeShop.id}, customer_id: ${finalCustId}`);
         const txPayload: any = {
