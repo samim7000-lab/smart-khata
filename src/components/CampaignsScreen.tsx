@@ -108,10 +108,24 @@ export const CampaignsScreen: React.FC<Props> = ({
     CampaignService.getCampaigns(shop.id).then((records) => setPastCampaigns(records));
   }, [shop.id]);
 
+  // Helper for initial default campaign message by app language
+  const getDefaultCampaignMessage = (lang: Language) => {
+    if (lang === 'bn') {
+      return 'প্রিয় {{customer_name}},\n\n{{store_name}} থেকে বকেয়া পরিশোধের আপডেট। {{today}} তারিখ পর্যন্ত আপনার বর্তমান বাকি টাকার পরিমাণ {{due_amount}}।\n\nদোকানের ঠিকানা: {{shop_address}}\nইনভয়েস রেফ: {{invoice_number}}\n\nধন্যবাদ!';
+    }
+    if (lang === 'hi') {
+      return 'प्रिय {{customer_name}},\n\n{{store_name}} की तरफ से एक विनम्र जानकारी। {{today}} तक आपका वर्तमान बकाया {{due_amount}} है।\n\nदुकान का पता: {{shop_address}}\nइनवॉइस सं: {{invoice_number}}\n\nधन्यवाद!';
+    }
+    return 'Dear {{customer_name}},\n\nThis is a friendly update from {{store_name}}. Your current pending balance is {{due_amount}} as of {{today}}.\n\nShop Address: {{shop_address}}\nInvoice Ref: {{invoice_number}}\n\nThank you!';
+  };
+
   // Message Composer State
-  const [messageText, setMessageText] = useState(
-    'Dear {{customer_name}},\n\nThis is a friendly update from {{store_name}}. Your current pending balance is {{due_amount}} as of {{today}}.\n\nShop Address: {{shop_address}}\nInvoice Ref: {{invoice_number}}\n\nThank you!'
-  );
+  const [messageText, setMessageText] = useState(() => getDefaultCampaignMessage(language));
+
+  // Sync default template when app language changes
+  React.useEffect(() => {
+    setMessageText(getDefaultCampaignMessage(language));
+  }, [language]);
 
   // Delivery Provider Engine
   const deliveryProvider: IDeliveryProvider = useMemo(() => new WhatsAppDirectLinkProvider(), []);
@@ -245,12 +259,22 @@ export const CampaignsScreen: React.FC<Props> = ({
 
   // Import Top AI Recovery Priorities
   const handleImportAIRecoveryPriorities = () => {
-    const analysis = generateWeeklyRecoveryPriorities(customers, transactions, shop);
+    const analysis = generateWeeklyRecoveryPriorities(customers, transactions, shop, language);
     const topCustIds = analysis.recommendations.slice(0, 10).map((rec) => rec.customer.id);
     setSelectedCustomerIds(new Set(topCustIds));
-    setMessageText(
-      'Dear {{customer_name}},\n\nFriendly reminder from {{store_name}}. Your pending balance is {{due_amount}} as of {{today}}.\n\nShop Address: {{shop_address}}\nInvoice Ref: {{invoice_ref}}\n\nThank you!'
-    );
+    if (language === 'bn') {
+      setMessageText(
+        'আসসালামু আলাইকুম {{customer_name}},\n\n{{store_name}} থেকে বকেয়া পরিশোধের বিনীত অনুরোধ। {{today}} তারিখ পর্যন্ত আপনার মোট বাকি টাকার পরিমাণ {{due_amount}}।\n\nঅনুগৃহ করে সুবিধামতো পেমেন্ট করে দিন।\nদোকানের ঠিকানা: {{shop_address}}\n\nধন্যবাদ!'
+      );
+    } else if (language === 'hi') {
+      setMessageText(
+        'नमस्ते {{customer_name}},\n\n{{store_name}} से बकाया भुगतान का विनम्र निवेदन। {{today}} तक आपकी कुल बकाया राशि {{due_amount}} है।\n\nकृपया अपनी सुविधा अनुसार भुगतान करें।\nदुकान का पता: {{shop_address}}\n\nधन्यवाद!'
+      );
+    } else {
+      setMessageText(
+        'Dear {{customer_name}},\n\nFriendly reminder from {{store_name}}. Your pending balance is {{due_amount}} as of {{today}}.\n\nShop Address: {{shop_address}}\nInvoice Ref: {{invoice_ref}}\n\nThank you!'
+      );
+    }
   };
 
   // Selected Preview Customer (Allows per-recipient live variable resolution testing)

@@ -161,9 +161,18 @@ export function analyzeCustomerRecovery(
     recommendedAction = 'Friendly Update Recommended';
   }
 
-  // Respectful Reminder Message Template
-  const rawTemplate =
-    'Dear {{customer_name}},\n\nFriendly update from {{store_name}}. Your current pending balance is {{due_amount}} as of {{today}}.\n\nShop Address: {{shop_address}}\nInvoice Ref: {{invoice_ref}}\n\nThank you!';
+  // Respectful Reminder Message Template based on App Language
+  let rawTemplate = '';
+  if (language === 'bn') {
+    rawTemplate =
+      'আসসালামু আলাইকুম {{customer_name}},\n\n{{store_name}} থেকে বকেয়া পরিশোধের বিনীত অনুরোধ। {{today}} তারিখ পর্যন্ত আপনার মোট বাকি টাকার পরিমাণ {{due_amount}}।\n\nঅনুগৃহ করে সুবিধামতো পেমেন্ট করে দিন।\nদোকানের ঠিকানা: {{shop_address}}\n\nধন্যবাদ!';
+  } else if (language === 'hi') {
+    rawTemplate =
+      'नमस्ते {{customer_name}},\n\n{{store_name}} से बकाया भुगतान का विनम्र निवेदन। {{today}} तक आपकी कुल बकाया राशि {{due_amount}} है।\n\nकृपया अपनी सुविधा अनुसार भुगतान करें।\nदुकान का पता: {{shop_address}}\n\nधन्यवाद!';
+  } else {
+    rawTemplate =
+      'Dear {{customer_name}},\n\nFriendly reminder from {{store_name}}. Your current pending balance is {{due_amount}} as of {{today}}.\n\nShop Address: {{shop_address}}\nInvoice Ref: {{invoice_ref}}\n\nThank you!';
+  }
 
   const suggestedMessage = replaceMessageVariables(rawTemplate, customer, shop);
 

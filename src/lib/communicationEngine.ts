@@ -1,6 +1,7 @@
 import { Customer, Shop } from '../types';
 import { formatShopCurrency } from './countryPricing';
 import { MetaCloudApiService } from './metaCloudApi';
+import { formatWhatsAppNumber } from './whatsappUtils';
 
 export interface DispatchMessagePayload {
   recipient: Customer;
@@ -124,7 +125,7 @@ export class WhatsAppDirectLinkProvider implements IDeliveryProvider {
       fullText = formattedText;
     }
 
-    const cleanPhone = payload.recipient.phone_number.replace(/\D/g, '');
+    const cleanPhone = formatWhatsAppNumber(payload.recipient.phone_number, payload.shop?.country);
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(fullText)}`;
 
     window.open(url, '_blank');
