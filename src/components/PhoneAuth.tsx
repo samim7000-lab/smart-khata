@@ -270,21 +270,18 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
                     try {
                       setLoading(true);
                       setErrorMsg('');
-                      const cleanAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
-                      const oauthQueryParams: Record<string, string> = {
-                        prompt: 'select_account',
-                      };
-                      if (cleanAnonKey && cleanAnonKey.length > 20) {
-                        oauthQueryParams.apikey = cleanAnonKey;
-                      }
-
                       const { error } = await supabase.auth.signInWithOAuth({
-                        provider: 'google',
-                        options: {
-                          redirectTo: window.location.origin,
-                          queryParams: oauthQueryParams,
-                        },
-                      });
+  provider: 'google',
+  options: {
+    redirectTo: window.location.origin,
+    queryParams: {
+      prompt: 'select_account',
+    },
+  },
+});
+                  
+
+                     
                       if (error) throw error;
                     } catch (err: any) {
                       console.error('[AUTH] Google Sign-In Error:', err);
