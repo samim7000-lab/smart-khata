@@ -3,6 +3,7 @@ import { Customer, Language, Shop, TransactionType } from '../types';
 import { translations } from '../i18n/translations';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { calculateGst, ALLOWED_GST_RATES, GstCalculationResult } from '../lib/gstUtils';
+import { formatShopCurrency, resolveCurrencySymbol } from '../lib/countryPricing';
 import {
   X,
   Search,
@@ -244,7 +245,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                           (c.balance || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
                         }`}
                       >
-                        {t.currency_symbol} {(c.balance || 0).toLocaleString()}
+                        {formatShopCurrency(c.balance, shop?.country, shop?.currency_code)}
                       </div>
                     </div>
                   </button>
@@ -410,17 +411,17 @@ export const AddTransactionModal: React.FC<Props> = ({
                     <div className="text-xs space-y-0.5 pt-1 text-blue-950 font-medium">
                       <div className="flex justify-between">
                         <span>{t.base_amount}:</span>
-                        <span>{t.currency_symbol} {gstCalc.baseAmount.toLocaleString()}</span>
+                        <span>{formatShopCurrency(gstCalc.baseAmount, shop?.country, shop?.currency_code)}</span>
                       </div>
                       {gstCalc.taxType === 'intra' ? (
                         <div className="flex justify-between text-[11px] text-blue-800 font-bold">
                           <span>{t.cgst} ({gstRate / 2}%) + {t.sgst} ({gstRate / 2}%):</span>
-                          <span>+{t.currency_symbol} {gstCalc.taxAmount.toLocaleString()}</span>
+                          <span>+{formatShopCurrency(gstCalc.taxAmount, shop?.country, shop?.currency_code)}</span>
                         </div>
                       ) : (
                         <div className="flex justify-between text-[11px] text-blue-800 font-bold">
                           <span>{t.igst} ({gstRate}%):</span>
-                          <span>+{t.currency_symbol} {gstCalc.taxAmount.toLocaleString()}</span>
+                          <span>+{formatShopCurrency(gstCalc.taxAmount, shop?.country, shop?.currency_code)}</span>
                         </div>
                       )}
                     </div>
@@ -434,7 +435,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                   {shop.gst_enabled ? t.total_with_tax : t.amount}
                 </div>
                 <div className="text-4xl font-black mt-1 tracking-tight flex items-center justify-center">
-                  <span className="text-slate-400 text-2xl mr-1">{t.currency_symbol}</span>
+                  <span className="text-slate-400 text-2xl mr-1">{resolveCurrencySymbol(shop?.country, shop?.currency_code)}</span>
                   <span className={enteredVal > 0 ? 'text-white' : 'text-slate-600'}>
                     {gstCalc.totalAmount.toLocaleString() || '0'}
                   </span>

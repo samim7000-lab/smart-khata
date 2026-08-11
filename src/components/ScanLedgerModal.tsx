@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Customer, Language, Shop, TransactionType } from '../types';
 import { translations } from '../i18n/translations';
 import { analyzeHandwrittenLedger, GeminiOcrResult } from '../lib/geminiUtils';
+import { resolveCurrencySymbol } from '../lib/countryPricing';
 import {
   Camera,
   X,
@@ -177,7 +178,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
     );
   };
 
-  const curr = t.currency_symbol;
+  const curr = resolveCurrencySymbol(shop?.country, shop?.currency_code);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
