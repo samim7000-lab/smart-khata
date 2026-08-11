@@ -232,21 +232,21 @@ export const ProfileScreen: React.FC<Props> = ({
         </div>
 
         {/* Enterprise Quick Hub Cards */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
           {/* Subscription Card */}
           <button
             type="button"
             onClick={onOpenSubscriptions}
-            className="p-3 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl text-left shadow-md hover:scale-[1.02] transition-transform flex flex-col justify-between"
+            className="p-2.5 sm:p-3 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl text-left shadow-md hover:scale-[1.02] transition-transform flex flex-col justify-between min-w-0"
           >
             <div>
-              <Sparkles className="w-5 h-5 text-yellow-300 mb-1" />
-              <div className="text-[10px] uppercase font-black text-blue-200">Plan</div>
-              <div className="text-xs font-black truncate">{shop.plan_tier || 'FREE'}</div>
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-300 mb-1 shrink-0" />
+              <div className="text-[9px] sm:text-[10px] uppercase font-black text-blue-200 truncate">Plan</div>
+              <div className="text-[11px] sm:text-xs font-black truncate">{shop.plan_tier || 'FREE'}</div>
             </div>
-            <div className="text-[9px] font-extrabold text-yellow-300 underline mt-2 flex items-center">
+            <div className="text-[9px] font-extrabold text-yellow-300 underline mt-1.5 flex items-center shrink-0">
               <span>Upgrade</span>
-              <ArrowRight className="w-2.5 h-2.5 ml-0.5" />
+              <ArrowRight className="w-2.5 h-2.5 ml-0.5 shrink-0" />
             </div>
           </button>
 
@@ -254,16 +254,16 @@ export const ProfileScreen: React.FC<Props> = ({
           <button
             type="button"
             onClick={onOpenShops}
-            className="p-3 bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-800 dark:to-slate-850 text-white rounded-2xl text-left shadow-md hover:scale-[1.02] transition-transform flex flex-col justify-between border border-slate-700"
+            className="p-2.5 sm:p-3 bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-800 dark:to-slate-850 text-white rounded-2xl text-left shadow-md hover:scale-[1.02] transition-transform flex flex-col justify-between border border-slate-700 min-w-0"
           >
             <div>
-              <Building2 className="w-5 h-5 text-blue-400 mb-1" />
-              <div className="text-[10px] uppercase font-black text-slate-400">Outlets</div>
-              <div className="text-xs font-black truncate">My Shops</div>
+              <Building2 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400 mb-1 shrink-0" />
+              <div className="text-[9px] sm:text-[10px] uppercase font-black text-slate-400 truncate">Outlets</div>
+              <div className="text-[11px] sm:text-xs font-black truncate">My Shops</div>
             </div>
-            <div className="text-[9px] font-extrabold text-blue-400 underline mt-2 flex items-center">
+            <div className="text-[9px] font-extrabold text-blue-400 underline mt-1.5 flex items-center shrink-0">
               <span>Switch</span>
-              <ArrowRight className="w-2.5 h-2.5 ml-0.5" />
+              <ArrowRight className="w-2.5 h-2.5 ml-0.5 shrink-0" />
             </div>
           </button>
 
@@ -271,16 +271,16 @@ export const ProfileScreen: React.FC<Props> = ({
           <button
             type="button"
             onClick={onOpenStaff}
-            className="p-3 bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-2xl text-left shadow-md hover:scale-[1.02] transition-transform flex flex-col justify-between"
+            className="p-2.5 sm:p-3 bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-2xl text-left shadow-md hover:scale-[1.02] transition-transform flex flex-col justify-between min-w-0"
           >
             <div>
-              <Users className="w-5 h-5 text-purple-200 mb-1" />
-              <div className="text-[10px] uppercase font-black text-indigo-200">Staff</div>
-              <div className="text-xs font-black truncate">Roles & Team</div>
+              <Users className="w-4 h-4 sm:w-5 sm:h-5 text-purple-200 mb-1 shrink-0" />
+              <div className="text-[9px] sm:text-[10px] uppercase font-black text-indigo-200 truncate">Staff</div>
+              <div className="text-[11px] sm:text-xs font-black truncate">Roles</div>
             </div>
-            <div className="text-[9px] font-extrabold text-purple-200 underline mt-2 flex items-center">
+            <div className="text-[9px] font-extrabold text-purple-200 underline mt-1.5 flex items-center shrink-0">
               <span>Manage</span>
-              <ArrowRight className="w-2.5 h-2.5 ml-0.5" />
+              <ArrowRight className="w-2.5 h-2.5 ml-0.5 shrink-0" />
             </div>
           </button>
         </div>

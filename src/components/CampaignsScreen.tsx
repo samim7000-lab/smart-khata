@@ -762,27 +762,27 @@ export const CampaignsScreen: React.FC<Props> = ({
             </div>
 
             {/* Validation Badges Grid */}
-            <div className="grid grid-cols-4 gap-2 text-center">
-              <div className="bg-slate-50 dark:bg-slate-800 p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <div className="text-[10px] uppercase font-black text-slate-400">Selected</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+              <div className="bg-slate-50 dark:bg-slate-800 p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 min-w-0">
+                <div className="text-[10px] uppercase font-black text-slate-400 truncate">Selected</div>
                 <div className="text-lg font-black text-slate-900 dark:text-white mt-0.5">
                   {validationBreakdown.selectedTotal}
                 </div>
               </div>
-              <div className="bg-emerald-50 dark:bg-emerald-950/50 p-2.5 rounded-2xl border border-emerald-200 dark:border-emerald-800">
-                <div className="text-[10px] uppercase font-black text-emerald-600">Valid</div>
+              <div className="bg-emerald-50 dark:bg-emerald-950/50 p-2.5 rounded-2xl border border-emerald-200 dark:border-emerald-800 min-w-0">
+                <div className="text-[10px] uppercase font-black text-emerald-600 truncate">Valid</div>
                 <div className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
                   {validationBreakdown.valid}
                 </div>
               </div>
-              <div className="bg-rose-50 dark:bg-rose-950/50 p-2.5 rounded-2xl border border-rose-200 dark:border-rose-800">
-                <div className="text-[10px] uppercase font-black text-rose-600">Invalid</div>
+              <div className="bg-rose-50 dark:bg-rose-950/50 p-2.5 rounded-2xl border border-rose-200 dark:border-rose-800 min-w-0">
+                <div className="text-[10px] uppercase font-black text-rose-600 truncate">Invalid</div>
                 <div className="text-lg font-black text-rose-600 dark:text-rose-400 mt-0.5">
                   {validationBreakdown.invalid}
                 </div>
               </div>
-              <div className="bg-amber-50 dark:bg-amber-950/50 p-2.5 rounded-2xl border border-amber-200 dark:border-amber-800">
-                <div className="text-[10px] uppercase font-black text-amber-600">Deduplicated</div>
+              <div className="bg-amber-50 dark:bg-amber-950/50 p-2.5 rounded-2xl border border-amber-200 dark:border-amber-800 min-w-0">
+                <div className="text-[10px] uppercase font-black text-amber-600 truncate" title="Deduplicated">Deduplicated</div>
                 <div className="text-lg font-black text-amber-600 dark:text-amber-400 mt-0.5">
                   {validationBreakdown.duplicatesRemoved}
                 </div>

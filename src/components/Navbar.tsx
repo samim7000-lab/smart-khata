@@ -42,13 +42,13 @@ export const Navbar: React.FC<Props> = ({
 
   return (
     <header className="bg-blue-600 text-white sticky top-0 z-30 shadow-md">
-      <div className="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+      <div className="max-w-md mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between">
         <button
           onClick={onOpenShops || onOpenProfile}
-          className="flex items-center space-x-3 text-left hover:opacity-90 transition-opacity min-w-0 flex-1 pr-2"
+          className="flex items-center space-x-2 sm:space-x-3 text-left hover:opacity-90 transition-opacity min-w-0 flex-1 pr-1.5"
           title="Switch Shop / Edit Profile"
         >
-          <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm relative overflow-hidden shrink-0 border border-white/20">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm relative overflow-hidden shrink-0 border border-white/20">
             {shop.logo_url ? (
               <img src={shop.logo_url} alt="Logo" className="w-full h-full object-cover" />
             ) : userAvatarUrl ? (
@@ -61,12 +61,12 @@ export const Navbar: React.FC<Props> = ({
                 className="w-full h-full object-cover"
               />
             ) : (
-              <Store className="w-6 h-6 text-white" />
+              <Store className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center space-x-1.5 min-w-0">
-              <h1 className="font-extrabold text-base leading-tight tracking-tight truncate">
+            <div className="flex items-center space-x-1 min-w-0">
+              <h1 className="font-extrabold text-sm sm:text-base leading-tight tracking-tight truncate">
                 {shop.shop_name}
               </h1>
 
@@ -76,13 +76,13 @@ export const Navbar: React.FC<Props> = ({
                   e.stopPropagation();
                   if (onOpenSubscriptions) onOpenSubscriptions();
                 }}
-                className="bg-yellow-400 text-slate-950 font-black text-[9px] uppercase px-1.5 py-0.5 rounded cursor-pointer hover:bg-yellow-300 transition-colors shrink-0 shadow-sm"
+                className="bg-yellow-400 text-slate-950 font-black text-[9px] uppercase px-1 py-0.5 rounded cursor-pointer hover:bg-yellow-300 transition-colors shrink-0 shadow-xs"
               >
                 {planTier}
               </span>
 
               {isDevMode && (
-                <span className="bg-amber-400 text-amber-950 font-black text-[9px] uppercase px-1.5 py-0.5 rounded flex items-center tracking-wider shrink-0 shadow-sm">
+                <span className="bg-amber-400 text-amber-950 font-black text-[9px] uppercase px-1 py-0.5 rounded flex items-center tracking-wider shrink-0 shadow-xs">
                   <Code2 className="w-2.5 h-2.5 mr-0.5" />
                   DEV
                 </span>
@@ -91,11 +91,11 @@ export const Navbar: React.FC<Props> = ({
             
             {/* Authenticated Account Identity Subtext */}
             <div className="flex items-center space-x-1 min-w-0">
-              <p className="text-xs text-blue-100 font-medium truncate">
+              <p className="text-[11px] sm:text-xs text-blue-100 font-medium truncate">
                 {shop.owner_name}
               </p>
               {userEmail && (
-                <span className="text-[10px] text-blue-200 font-normal truncate shrink">
+                <span className="text-[9px] sm:text-[10px] text-blue-200 font-normal truncate shrink hidden sm:inline">
                   • {userEmail}
                 </span>
               )}
@@ -103,7 +103,7 @@ export const Navbar: React.FC<Props> = ({
           </div>
         </button>
 
-        <div className="flex items-center space-x-1.5">
+        <div className="flex items-center space-x-1 sm:space-x-1.5 shrink-0">
           {/* Shop Switcher Button */}
           {onOpenShops && (
             <button

@@ -270,10 +270,10 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                     : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center space-x-3 min-w-0 flex-1">
                     <div
-                      className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm ${
+                      className={`w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${
                         isHigh
                           ? 'bg-rose-600 text-white'
                           : isMed
@@ -283,13 +283,13 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                     >
                       {item.score}
                     </div>
-                    <div>
-                      <div className="flex items-center space-x-2">
-                        <h4 className="font-extrabold text-slate-900 dark:text-white text-base">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                        <h4 className="font-extrabold text-slate-900 dark:text-white text-sm sm:text-base truncate max-w-[160px] sm:max-w-none">
                           {item.customer.display_label}
                         </h4>
                         <span
-                          className={`font-black text-[9px] uppercase px-2 py-0.5 rounded-full ${
+                          className={`font-black text-[9px] uppercase px-2 py-0.5 rounded-full shrink-0 ${
                             isHigh
                               ? 'bg-rose-200 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
                               : isMed
@@ -300,13 +300,13 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                           Priority {item.score}/100
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
                         {item.customer.phone_number} • Overdue: {item.oldestUnpaidDays} days
                       </p>
                     </div>
                   </div>
 
-                  <div className="text-right">
+                  <div className="text-left sm:text-right shrink-0">
                     <div className="text-lg font-black text-rose-600 dark:text-rose-400">
                       {formatShopCurrency(item.outstandingBalance, shop.country, shop.currency_code)}
                     </div>
@@ -322,19 +322,19 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                   </div>
 
                   {/* Bulleted Human-Readable Reasons */}
-                  <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600 dark:text-slate-400 pl-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] text-slate-600 dark:text-slate-400 pl-6">
                     {item.reasons.map((reason, idx) => (
-                      <span key={idx}>{reason}</span>
+                      <span key={idx} className="break-words">{reason}</span>
                     ))}
                   </div>
 
                   {/* Action Recommendation & Cooldown Badge */}
-                  <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[11px] gap-1.5">
                     <span className="font-extrabold text-purple-600 dark:text-purple-400 flex items-center">
                       💡 Action: {item.recommendedAction}
                     </span>
                     {item.cooldownActive && (
-                      <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold px-2 py-0.5 rounded-full text-[10px]">
+                      <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold px-2 py-0.5 rounded-full text-[10px] shrink-0 self-start sm:self-auto">
                         ⏳ Cooldown Active ({item.cooldownDaysRemaining}d remaining)
                       </span>
                     )}

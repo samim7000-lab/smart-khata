@@ -251,26 +251,26 @@ export const HistoryScreen: React.FC<Props> = ({
                     : 'border-green-100 hover:border-green-200'
                 }`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <div className="font-extrabold text-slate-900 text-base flex items-center space-x-2">
-                      <span>{cust?.display_label || 'Unknown Customer'}</span>
-                      {isVoid && <span className="badge-void">{t.void_correction}</span>}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1 min-w-0 flex-1 pr-1">
+                    <div className="font-extrabold text-slate-900 text-sm sm:text-base flex items-center space-x-2 flex-wrap gap-y-1">
+                      <span className="truncate max-w-[180px] sm:max-w-none">{cust?.display_label || 'Unknown Customer'}</span>
+                      {isVoid && <span className="badge-void shrink-0">{t.void_correction}</span>}
                     </div>
 
-                    <div className="text-xs text-slate-500 font-medium flex items-center space-x-3">
+                    <div className="text-xs text-slate-500 font-medium flex items-center space-x-2 flex-wrap text-[11px]">
                       <span>{cust?.phone_number}</span>
                       <span>•</span>
                       <span className="flex items-center">
-                        <Calendar className="w-3 h-3 mr-1 text-slate-400" />
+                        <Calendar className="w-3 h-3 mr-1 text-slate-400 shrink-0" />
                         {formatDate(tx.created_at)}
                       </span>
                     </div>
                   </div>
 
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <div
-                      className={`text-xl font-black ${
+                      className={`text-lg sm:text-xl font-black ${
                         isVoid
                           ? 'text-slate-500 line-through'
                           : isCredit

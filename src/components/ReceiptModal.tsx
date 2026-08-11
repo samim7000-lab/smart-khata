@@ -420,40 +420,40 @@ ${t.receipt_thank_you} - ${shop.owner_name}`;
           </p>
 
           {/* Multi Control Action Grid */}
-          <div className="grid grid-cols-4 gap-1.5 pt-1">
+          <div className="grid grid-cols-4 gap-1 sm:gap-1.5 pt-1">
             <button
               onClick={handleDownloadImage}
               disabled={isGenerating}
-              className="py-2.5 px-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs rounded-xl flex items-center justify-center space-x-1 shadow-xs transition-colors disabled:opacity-50"
+              className="py-2.5 px-1 sm:px-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-[11px] sm:text-xs rounded-xl flex items-center justify-center space-x-1 shadow-xs transition-colors disabled:opacity-50 min-w-0"
               title="Download Receipt Image"
             >
-              <ImageIcon className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Image</span>
+              <ImageIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
+              <span className="truncate">Image</span>
             </button>
 
             <button
               onClick={() => printTransactionReceiptPDF(transaction, customer, shop, language)}
-              className="py-2.5 px-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 font-bold text-xs rounded-xl flex items-center justify-center space-x-1 shadow-xs transition-colors"
+              className="py-2.5 px-1 sm:px-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 font-bold text-[11px] sm:text-xs rounded-xl flex items-center justify-center space-x-1 shadow-xs transition-colors min-w-0"
               title="Download PDF"
             >
-              <FileCheck2 className="w-4 h-4 text-blue-600 shrink-0" />
-              <span>PDF</span>
+              <FileCheck2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 shrink-0" />
+              <span className="truncate">PDF</span>
             </button>
 
             <button
               onClick={handlePrint}
-              className="py-2.5 px-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs rounded-xl flex items-center justify-center space-x-1 shadow-xs transition-colors"
+              className="py-2.5 px-1 sm:px-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-[11px] sm:text-xs rounded-xl flex items-center justify-center space-x-1 shadow-xs transition-colors min-w-0"
             >
-              <Printer className="w-4 h-4 text-slate-600 shrink-0" />
-              <span>Print</span>
+              <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600 shrink-0" />
+              <span className="truncate">Print</span>
             </button>
 
             <button
               onClick={handleCopyText}
-              className="py-2.5 px-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs rounded-xl flex items-center justify-center space-x-1 shadow-xs transition-colors"
+              className="py-2.5 px-1 sm:px-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-[11px] sm:text-xs rounded-xl flex items-center justify-center space-x-1 shadow-xs transition-colors min-w-0"
             >
-              {copied ? <Check className="w-4 h-4 text-green-600 shrink-0" /> : <Copy className="w-4 h-4 text-slate-600 shrink-0" />}
-              <span>{copied ? 'Copied!' : 'Copy'}</span>
+              {copied ? <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-600 shrink-0" /> : <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600 shrink-0" />}
+              <span className="truncate">{copied ? 'Done' : 'Copy'}</span>
             </button>
           </div>
         </div>

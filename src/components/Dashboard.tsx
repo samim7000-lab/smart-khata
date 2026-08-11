@@ -160,25 +160,25 @@ export const Dashboard: React.FC<Props> = ({
       </div>
 
       {/* Quick Actions Bar */}
-      <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-between">
-        <span className="text-xs font-extrabold text-slate-700 dark:text-slate-300 uppercase tracking-wider pl-2">
+      <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+        <span className="text-xs font-extrabold text-slate-700 dark:text-slate-300 uppercase tracking-wider pl-1">
           {t.quick_actions}
         </span>
-        <div className="flex space-x-2">
+        <div className="flex items-center space-x-2">
           <button
             disabled={true}
-            className="px-3.5 py-2 bg-slate-100 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400 font-extrabold text-xs rounded-xl shadow-none flex items-center space-x-1.5 cursor-not-allowed opacity-75"
+            className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 bg-slate-100 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400 font-extrabold text-xs rounded-xl shadow-none flex items-center justify-center space-x-1.5 cursor-not-allowed opacity-75 min-w-0"
             title="AI Handwriting Scanner Coming Soon"
           >
-            <Camera className="w-4 h-4 text-slate-400" />
-            <span>🚧 AI Handwriting Scanner - Coming Soon</span>
+            <Camera className="w-4 h-4 text-slate-400 shrink-0" />
+            <span className="truncate">🚧 AI Scanner - Soon</span>
           </button>
 
           <button
             onClick={onOpenAddTx}
-            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center space-x-1 transition-colors"
+            className="flex-1 sm:flex-none px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center justify-center space-x-1 transition-colors shrink-0"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>{t.add_new_transaction}</span>
           </button>
         </div>

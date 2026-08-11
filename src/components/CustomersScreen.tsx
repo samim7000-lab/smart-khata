@@ -130,18 +130,18 @@ export const CustomersScreen: React.FC<Props> = ({
                   owesMoney ? 'border-red-100' : 'border-green-100'
                 }`}
               >
-                <div className="space-y-1">
-                  <div className="font-extrabold text-slate-900 text-base">{customer.display_label}</div>
+                <div className="space-y-1 min-w-0 flex-1 pr-2">
+                  <div className="font-extrabold text-slate-900 text-sm sm:text-base truncate">{customer.display_label}</div>
                   <div className="flex items-center text-xs text-slate-500 font-medium space-x-1">
-                    <Phone className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{customer.phone_number}</span>
+                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{customer.phone_number}</span>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
                   <div className="text-right">
                     <div
-                      className={`text-lg font-black tracking-tight ${
+                      className={`text-base sm:text-lg font-black tracking-tight ${
                         owesMoney ? 'text-red-600' : 'text-green-600'
                       }`}
                     >
@@ -155,7 +155,7 @@ export const CustomersScreen: React.FC<Props> = ({
                       {owesMoney ? t.owe_money : t.paid_up}
                     </div>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-slate-400" />
+                  <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" />
                 </div>
               </div>
             );
