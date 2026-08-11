@@ -150,9 +150,9 @@ export const StaffModal: React.FC<Props> = ({ shop, language, onClose }) => {
                       key={m.id}
                       className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 flex items-center justify-between space-x-2 shadow-xs"
                     >
-                      <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-3 min-w-0 flex-1 pr-1">
                         <div
-                          className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm ${
+                          className={`w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${
                             isOwner
                               ? 'bg-amber-100 dark:bg-amber-950 text-amber-600'
                               : 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600'
@@ -160,13 +160,13 @@ export const StaffModal: React.FC<Props> = ({ shop, language, onClose }) => {
                         >
                           {isOwner ? <Crown className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
                         </div>
-                        <div>
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center space-x-2">
-                            <h5 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                            <h5 className="font-extrabold text-slate-900 dark:text-white text-sm truncate">
                               {m.user_name}
                             </h5>
                           </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
                             {m.user_phone}
                           </p>
                         </div>

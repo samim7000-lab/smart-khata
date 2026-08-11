@@ -380,13 +380,13 @@ export const AddTransactionModal: React.FC<Props> = ({
 
               {/* GST Tax Selector Bar (When GST Enabled) */}
               {shop.gst_enabled && (
-                <div className="bg-blue-50/80 p-3.5 rounded-2xl border border-blue-200 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-extrabold text-blue-900">
-                    <span className="flex items-center">
-                      <Percent className="w-4 h-4 mr-1 text-blue-600" />
-                      {t.select_gst_rate}
+                <div className="bg-blue-50/80 p-3 sm:p-3.5 rounded-2xl border border-blue-200 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-extrabold text-blue-900 flex-wrap gap-1">
+                    <span className="flex items-center min-w-0">
+                      <Percent className="w-4 h-4 mr-1 text-blue-600 shrink-0" />
+                      <span className="truncate">{t.select_gst_rate}</span>
                     </span>
-                    <span className="text-[11px] bg-blue-200 text-blue-800 px-2 py-0.5 rounded-md uppercase">
+                    <span className="text-[10px] sm:text-[11px] bg-blue-200 text-blue-800 px-2 py-0.5 rounded-md uppercase shrink-0 truncate max-w-[150px] sm:max-w-none">
                       {gstCalc.taxType === 'intra' ? t.intra_state_tax : t.inter_state_tax}
                     </span>
                   </div>
@@ -431,13 +431,13 @@ export const AddTransactionModal: React.FC<Props> = ({
               )}
 
               {/* Amount Display */}
-              <div className="bg-slate-900 text-white rounded-2xl p-4 text-center shadow-inner">
-                <div className="text-xs text-slate-400 uppercase font-extrabold tracking-wider">
+              <div className="bg-slate-900 text-white rounded-2xl p-3.5 sm:p-4 text-center shadow-inner overflow-hidden">
+                <div className="text-xs text-slate-400 uppercase font-extrabold tracking-wider truncate">
                   {shop.gst_enabled ? t.total_with_tax : t.amount}
                 </div>
-                <div className="text-4xl font-black mt-1 tracking-tight flex items-center justify-center">
-                  <span className="text-slate-400 text-2xl mr-1">{resolveCurrencySymbol(shop?.country, shop?.currency_code)}</span>
-                  <span className={enteredVal > 0 ? 'text-white' : 'text-slate-600'}>
+                <div className="text-2xl sm:text-4xl font-black mt-1 tracking-tight flex items-center justify-center min-w-0">
+                  <span className="text-slate-400 text-xl sm:text-2xl mr-1 shrink-0">{resolveCurrencySymbol(shop?.country, shop?.currency_code)}</span>
+                  <span className={`truncate max-w-full ${enteredVal > 0 ? 'text-white' : 'text-slate-600'}`}>
                     {gstCalc.totalAmount.toLocaleString() || '0'}
                   </span>
                 </div>

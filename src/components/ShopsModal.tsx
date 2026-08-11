@@ -113,33 +113,33 @@ export const ShopsModal: React.FC<Props> = ({
                           : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                       }`}
                     >
-                      <div className="flex items-center space-x-3.5">
+                      <div className="flex items-center space-x-3 min-w-0 flex-1 pr-2">
                         <div
-                          className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg ${
+                          className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center font-black text-lg shrink-0 ${
                             isActive
                               ? 'bg-blue-600 text-white'
                               : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
                           }`}
                         >
-                          <Building2 className="w-6 h-6" />
+                          <Building2 className="w-5 h-5 sm:w-6 sm:h-6" />
                         </div>
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <h5 className="font-extrabold text-slate-900 dark:text-white text-base">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                            <h5 className="font-extrabold text-slate-900 dark:text-white text-sm sm:text-base truncate max-w-[140px] sm:max-w-none">
                               {s.shop_name}
                             </h5>
                             {isActive && (
-                              <span className="bg-blue-600 text-white font-black text-[9px] uppercase px-2 py-0.5 rounded-full">
+                              <span className="bg-blue-600 text-white font-black text-[9px] uppercase px-2 py-0.5 rounded-full shrink-0">
                                 Active
                               </span>
                             )}
                             {idx === 0 && (
-                              <span className="bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[9px] uppercase px-1.5 py-0.5 rounded-md">
+                              <span className="bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[9px] uppercase px-1.5 py-0.5 rounded-md shrink-0">
                                 Primary
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
                             Owner: {s.owner_name} • Currency: {s.currency_code || 'BDT'}
                           </p>
                         </div>

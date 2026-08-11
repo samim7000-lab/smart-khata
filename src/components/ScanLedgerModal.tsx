@@ -380,19 +380,19 @@ export const ScanLedgerModal: React.FC<Props> = ({
               {/* Customer Auto-Matching Card */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2 text-xs">
                 {matchedCustomer ? (
-                  <div className="flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-xl">
-                    <div className="flex items-center space-x-2">
+                  <div className="flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-xl gap-2 min-w-0">
+                    <div className="flex items-center space-x-2 min-w-0 flex-1 pr-1">
                       <UserCheck className="w-5 h-5 text-green-600 shrink-0" />
-                      <div>
-                        <span className="font-extrabold text-slate-900 text-sm block">
+                      <div className="min-w-0 flex-1">
+                        <span className="font-extrabold text-slate-900 text-sm block truncate">
                           {matchedCustomer.display_label}
                         </span>
-                        <span className="text-[11px] text-slate-500 font-medium">
+                        <span className="text-[11px] text-slate-500 font-medium block truncate">
                           {matchedCustomer.phone_number}
                         </span>
                       </div>
                     </div>
-                    <span className="bg-green-600 text-white font-black text-[10px] uppercase px-2 py-0.5 rounded-md">
+                    <span className="bg-green-600 text-white font-black text-[10px] uppercase px-2 py-0.5 rounded-md shrink-0">
                       Matched
                     </span>
                   </div>

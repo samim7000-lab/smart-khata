@@ -160,25 +160,25 @@ export const SubscriptionModal: React.FC<Props> = ({
               </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
-              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="text-slate-400 font-medium">Campaign Limit</div>
-                <div className="font-black text-slate-900 dark:text-white mt-0.5">
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 min-w-0">
+                <div className="text-slate-400 font-medium truncate">Campaign Limit</div>
+                <div className="font-black text-slate-900 dark:text-white mt-0.5 truncate">
                   {entitlements.campaignRecipientLimit} / campaign
                 </div>
               </div>
-              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="text-slate-400 font-medium">AI Recovery Quota</div>
-                <div className="font-black text-slate-900 dark:text-white mt-0.5">
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 min-w-0">
+                <div className="text-slate-400 font-medium truncate">AI Recovery Quota</div>
+                <div className="font-black text-slate-900 dark:text-white mt-0.5 truncate">
                   {entitlements.weeklyAiQuota === 0 ? 'Preview Only' : `${entitlements.weeklyAiQuota} / week`}
                 </div>
               </div>
-              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="text-slate-400 font-medium">Meta Cloud API</div>
-                <div className="font-black text-amber-600 dark:text-amber-400 mt-0.5">Not Connected</div>
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 min-w-0">
+                <div className="text-slate-400 font-medium truncate">Meta Cloud API</div>
+                <div className="font-black text-amber-600 dark:text-amber-400 mt-0.5 truncate">Not Connected</div>
               </div>
-              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="text-slate-400 font-medium">Auto Dispatch</div>
-                <div className="font-black text-slate-500 mt-0.5">OFF</div>
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 min-w-0">
+                <div className="text-slate-400 font-medium truncate">Auto Dispatch</div>
+                <div className="font-black text-slate-500 mt-0.5 truncate">OFF</div>
               </div>
             </div>
           </div>
