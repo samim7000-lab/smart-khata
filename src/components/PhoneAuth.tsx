@@ -15,6 +15,9 @@ import {
   CheckCircle2
 } from 'lucide-react';
 
+// Feature Flag: Temporarily disable Mobile OTP until SMS Gateway integration
+const PHONE_OTP_ENABLED = false;
+
 interface Props {
   language: Language;
   onSuccess: (phone: string, userId?: string) => void;
@@ -86,6 +89,9 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
 
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!PHONE_OTP_ENABLED) {
+      return;
+    }
     if (!phoneNumber.trim() || phoneNumber.length < 8) {
       setErrorMsg(t.invalid_phone_error);
       return;
@@ -132,6 +138,9 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!PHONE_OTP_ENABLED) {
+      return;
+    }
     if (!otpCode.trim() || otpCode.length < 4) {
       setErrorMsg(t.invalid_otp_error);
       return;
@@ -188,8 +197,8 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
           {t.back}
         </button>
 
-        {/* DEVELOPMENT MODE BADGE */}
-        {isDevAuth && (
+        {/* DEVELOPMENT MODE BADGE (only if Dev Mode is active and Phone OTP is enabled) */}
+        {isDevAuth && PHONE_OTP_ENABLED && (
           <div className="bg-amber-50 dark:bg-amber-950/80 border-2 border-amber-400 dark:border-amber-700 text-amber-950 dark:text-amber-200 font-extrabold text-xs p-3.5 rounded-2xl mb-4 flex items-center justify-between shadow-sm">
             <div className="flex items-center space-x-2">
               <span className="bg-amber-500 text-slate-950 text-[10px] uppercase font-black px-2 py-0.5 rounded-md tracking-wider flex items-center shadow-sm">
@@ -201,7 +210,7 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
           </div>
         )}
 
-        {!isSupabaseConfigured && !isDevAuth && (
+        {!isSupabaseConfigured && !isDevAuth && PHONE_OTP_ENABLED && (
           <div className="bg-amber-50 dark:bg-amber-950/80 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs p-3 rounded-xl mb-4">
             <span className="font-bold">{t.demo_mode}:</span> {t.demo_notice}
           </div>
@@ -210,14 +219,21 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
         <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700 space-y-5">
           {step === 'phone' ? (
             <form onSubmit={handleSendOtp} className="space-y-5">
-              <div className="flex items-center space-x-3">
-                <div className="w-14 h-14 bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center shrink-0">
-                  <Phone className="w-7 h-7" />
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 sm:w-14 sm:h-14 bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center shrink-0">
+                    <Phone className="w-6 h-6 sm:w-7 sm:h-7" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">{t.phone_login}</h2>
+                    <p className="text-slate-500 dark:text-slate-400 text-xs font-medium mt-0.5">{t.enter_mobile}</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{t.phone_login}</h2>
-                  <p className="text-slate-500 dark:text-slate-400 text-xs font-medium mt-0.5">{t.enter_mobile}</p>
-                </div>
+                {!PHONE_OTP_ENABLED && (
+                  <span className="bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-extrabold text-[10px] sm:text-xs px-2.5 py-1 rounded-xl shrink-0 mt-0.5 shadow-xs">
+                    {t.mobile_otp_coming_soon}
+                  </span>
+                )}
               </div>
 
               <div>
@@ -228,7 +244,8 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
                   language={language}
                   value={phoneNumber}
                   onChange={(e164) => setPhoneNumber(e164)}
-                  autoFocus
+                  autoFocus={PHONE_OTP_ENABLED}
+                  disabled={!PHONE_OTP_ENABLED}
                 />
               </div>
 
@@ -240,8 +257,12 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
 
               <button
                 type="submit"
-                disabled={loading}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-lg rounded-2xl shadow-xl shadow-blue-600/30 flex items-center justify-center space-x-2 transition-all active:scale-[0.98] disabled:opacity-50"
+                disabled={!PHONE_OTP_ENABLED || loading}
+                className={`w-full py-4 text-white font-extrabold text-lg rounded-2xl shadow-xl flex items-center justify-center space-x-2 transition-all ${
+                  !PHONE_OTP_ENABLED
+                    ? 'opacity-50 cursor-not-allowed bg-slate-400 dark:bg-slate-700 shadow-none pointer-events-none'
+                    : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98] shadow-blue-600/30'
+                }`}
               >
                 {loading ? (
                   <Loader2 className="w-6 h-6 animate-spin" />

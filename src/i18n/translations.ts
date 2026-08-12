@@ -17,6 +17,7 @@ export type TranslationKey =
   | 'phone_login'
   | 'enter_mobile'
   | 'mobile_placeholder'
+  | 'mobile_otp_coming_soon'
   | 'send_otp'
   | 'enter_otp'
   | 'verify_otp'
@@ -196,6 +197,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     phone_login: 'Mobile Phone Login',
     enter_mobile: 'Enter your mobile number to log in',
     mobile_placeholder: '1700000000',
+    mobile_otp_coming_soon: 'Mobile OTP — Coming Soon',
     send_otp: 'Send OTP Code',
     enter_otp: 'Enter 6-Digit OTP',
     verify_otp: 'Verify & Login',
@@ -372,6 +374,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     phone_login: 'মোবাইল নম্বর দিয়ে লগইন',
     enter_mobile: 'লগইন করতে আপনার নম্বর লিখুন',
     mobile_placeholder: '১৭০০০০০০০০',
+    mobile_otp_coming_soon: 'মোবাইল ওটিপি — শীঘ্রই আসছে',
     send_otp: 'ওটিপি (OTP) পাঠান',
     enter_otp: '৬ সংখ্যার ওটিপি লিখুন',
     verify_otp: 'যাচাই করুন ও লগইন',
@@ -548,6 +551,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     phone_login: 'मोबाइल नंबर से लॉगिन',
     enter_mobile: 'लॉगिन करने के लिए अपना नंबर दर्ज करें',
     mobile_placeholder: '9800000000',
+    mobile_otp_coming_soon: 'मोबाइल ओटीपी — जल्द आ रहा है',
     send_otp: 'ओटीपी (OTP) भेजें',
     enter_otp: '6-अंकों का ओटीपी दर्ज करें',
     verify_otp: 'सत्यापित करें और लॉगिन',

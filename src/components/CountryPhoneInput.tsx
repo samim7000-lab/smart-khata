@@ -11,6 +11,7 @@ interface Props {
   placeholder?: string;
   autoFocus?: boolean;
   required?: boolean;
+  disabled?: boolean;
 }
 
 export const CountryPhoneInput: React.FC<Props> = ({
@@ -20,6 +21,7 @@ export const CountryPhoneInput: React.FC<Props> = ({
   placeholder,
   autoFocus = false,
   required = false,
+  disabled = false,
 }) => {
   const t = translations[language];
   const [selectedCountry, setSelectedCountry] = useState<CountryConfig>(() => getBrowserCountry());
@@ -85,8 +87,11 @@ export const CountryPhoneInput: React.FC<Props> = ({
         {/* Country Picker Trigger Button: [CountryCode] [FlagImg] [DialCode] */}
         <button
           type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-1.5 px-3 py-3 bg-slate-100 dark:bg-slate-700/80 hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-gray-300 dark:border-slate-600 text-gray-900 dark:text-white font-extrabold text-xs sm:text-sm transition-colors shrink-0 select-none z-10"
+          disabled={disabled}
+          onClick={() => !disabled && setIsOpen(!isOpen)}
+          className={`flex items-center gap-1.5 px-3 py-3 bg-slate-100 dark:bg-slate-700/80 border-r-2 border-gray-300 dark:border-slate-600 text-gray-900 dark:text-white font-extrabold text-xs sm:text-sm transition-colors shrink-0 select-none z-10 ${
+            disabled ? 'opacity-60 cursor-not-allowed pointer-events-none' : 'hover:bg-slate-200 dark:hover:bg-slate-700'
+          }`}
         >
           {/* Country Short Code (e.g. IN, BD) */}
           <span className="font-black text-xs uppercase tracking-wider text-slate-700 dark:text-slate-200">
@@ -115,12 +120,15 @@ export const CountryPhoneInput: React.FC<Props> = ({
         {/* Local Number Input */}
         <input
           type="tel"
+          disabled={disabled}
           required={required}
           value={localNumber}
           onChange={(e) => handleNumberChange(e.target.value)}
           placeholder={placeholder || t.mobile_placeholder}
-          autoFocus={autoFocus}
-          className="flex-1 min-w-0 px-3.5 py-3 text-xl font-black tracking-wide text-gray-900 dark:text-white bg-transparent outline-none placeholder-gray-400 dark:placeholder-gray-400"
+          autoFocus={autoFocus && !disabled}
+          className={`flex-1 min-w-0 px-3.5 py-3 text-xl font-black tracking-wide text-gray-900 dark:text-white bg-transparent outline-none placeholder-gray-400 dark:placeholder-gray-400 ${
+            disabled ? 'opacity-60 cursor-not-allowed bg-slate-50 dark:bg-slate-800/50' : ''
+          }`}
         />
       </div>
 
