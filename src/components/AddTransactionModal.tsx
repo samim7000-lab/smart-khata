@@ -4,6 +4,7 @@ import { translations } from '../i18n/translations';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { calculateGst, ALLOWED_GST_RATES, GstCalculationResult } from '../lib/gstUtils';
 import { formatShopCurrency, resolveCurrencySymbol } from '../lib/countryPricing';
+import { EMIForm } from './EMIForm';
 import {
   X,
   Search,
@@ -16,7 +17,8 @@ import {
   MinusCircle,
   FileText,
   Percent,
-  MapPin
+  MapPin,
+  CreditCard
 } from 'lucide-react';
 
 interface Props {
@@ -57,6 +59,7 @@ export const AddTransactionModal: React.FC<Props> = ({
   const [duplicateWarning, setDuplicateWarning] = useState('');
 
   const [txType, setTxType] = useState<TransactionType>('credit_given');
+  const [isEMIMode, setIsEMIMode] = useState(false);
   const [amountStr, setAmountStr] = useState('');
   const [note, setNote] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -349,34 +352,74 @@ export const AddTransactionModal: React.FC<Props> = ({
                 )}
               </div>
 
-              {/* Transaction Type Buttons */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Transaction Type / Payment Options Selector */}
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() => setTxType('credit_given')}
-                  className={`p-3.5 rounded-2xl border-2 flex flex-col items-center justify-center transition-all ${
-                    txType === 'credit_given'
-                      ? 'border-red-600 bg-red-50 text-red-700 shadow-md'
+                  onClick={() => {
+                    setIsEMIMode(false);
+                    setTxType('payment_received');
+                  }}
+                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center transition-all min-h-[50px] ${
+                    !isEMIMode && txType === 'payment_received'
+                      ? 'border-emerald-600 bg-emerald-50 text-emerald-700 shadow-md font-black'
                       : 'border-slate-200 bg-white text-slate-600'
                   }`}
                 >
-                  <MinusCircle className="w-7 h-7 text-red-600 mb-1" />
-                  <span className="font-extrabold text-sm">{t.credit_given}</span>
+                  <PlusCircle className="w-5 h-5 text-emerald-600 mb-0.5" />
+                  <span className="font-extrabold text-xs">{language === 'bn' ? 'নগদ জমা' : 'Full Payment'}</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setTxType('payment_received')}
-                  className={`p-3.5 rounded-2xl border-2 flex flex-col items-center justify-center transition-all ${
-                    txType === 'payment_received'
-                      ? 'border-green-600 bg-green-50 text-green-700 shadow-md'
+                  onClick={() => {
+                    setIsEMIMode(false);
+                    setTxType('credit_given');
+                  }}
+                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center transition-all min-h-[50px] ${
+                    !isEMIMode && txType === 'credit_given'
+                      ? 'border-rose-600 bg-rose-50 text-rose-700 shadow-md font-black'
                       : 'border-slate-200 bg-white text-slate-600'
                   }`}
                 >
-                  <PlusCircle className="w-7 h-7 text-green-600 mb-1" />
-                  <span className="font-extrabold text-sm">{t.payment_received}</span>
+                  <MinusCircle className="w-5 h-5 text-rose-600 mb-0.5" />
+                  <span className="font-extrabold text-xs">{language === 'bn' ? 'বাকি' : 'Due / Baki'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEMIMode(true);
+                  }}
+                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center transition-all min-h-[50px] ${
+                    isEMIMode
+                      ? 'border-purple-600 bg-purple-50 text-purple-700 shadow-md font-black'
+                      : 'border-slate-200 bg-white text-slate-600'
+                  }`}
+                >
+                  <CreditCard className="w-5 h-5 text-purple-600 mb-0.5" />
+                  <span className="font-extrabold text-xs">{language === 'bn' ? 'কিস্তি / EMI' : 'EMI Plan'}</span>
                 </button>
               </div>
+
+              {/* Render inline EMI setup form when EMI mode selected */}
+              {isEMIMode ? (
+                <div className="pt-2">
+                  <EMIForm
+                    shop={shop}
+                    customers={customers}
+                    selectedCustomer={selectedCustomer}
+                    language={language}
+                    initialAmount={enteredVal}
+                    initialNote={note}
+                    onSuccess={(accountId) => {
+                      onClose();
+                    }}
+                    onCancel={() => setIsEMIMode(false)}
+                  />
+                </div>
+              ) : (
+                <>
 
               {/* GST Tax Selector Bar (When GST Enabled) */}
               {shop.gst_enabled && (
@@ -491,6 +534,8 @@ export const AddTransactionModal: React.FC<Props> = ({
                 <CheckCircle2 className="w-6 h-6" />
                 <span>{t.save_transaction}</span>
               </button>
+              </>
+              )}
             </div>
           )}
         </div>

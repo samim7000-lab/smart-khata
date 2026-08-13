@@ -9,7 +9,9 @@ import {
 import { getCountryPricing, formatShopCurrency } from '../lib/countryPricing';
 import { WhatsAppDirectLinkProvider } from '../lib/communicationEngine';
 import { EntitlementService } from '../lib/entitlementEngine';
-import { canUse } from '../lib/planConfig';
+import { EMIService, EMIAccountDB, EMIInstallmentDB } from '../lib/emiService';
+import { EMIForm } from './EMIForm';
+import { EMIAccountDetail } from './EMIAccountDetail';
 import {
   Brain,
   Sparkles,
@@ -22,7 +24,8 @@ import {
   AlertCircle,
   Calendar,
   Layers,
-  ShoppingBag
+  ShoppingBag,
+  Plus
 } from 'lucide-react';
 
 interface Props {
@@ -44,6 +47,7 @@ export interface EMIRecord {
   totalEmiCount: number;
   nextDueDate: string;
   status: 'active' | 'upcoming' | 'due_today' | 'overdue' | 'partially_paid' | 'completed';
+  rawAccount?: EMIAccountDB;
 }
 
 export const AIRecoveryDashboard: React.FC<Props> = ({
@@ -67,6 +71,22 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
   const [customMsgText, setCustomMsgText] = useState('');
   const [autoModeEnabled, setAutoModeEnabled] = useState(false);
 
+  // EMI Creation & Inspection Modal State
+  const [isEMIFormOpen, setIsEMIFormOpen] = useState(false);
+  const [selectedEMIAccount, setSelectedEMIAccount] = useState<EMIAccountDB | null>(null);
+  const [realEmiAccounts, setRealEmiAccounts] = useState<EMIAccountDB[]>([]);
+
+  // Load Real Supabase EMI Accounts
+  const loadEmiAccounts = React.useCallback(async () => {
+    if (!shop.id) return;
+    const records = await EMIService.getEMIAccounts(shop.id, customers);
+    setRealEmiAccounts(records);
+  }, [shop.id, customers]);
+
+  React.useEffect(() => {
+    loadEmiAccounts();
+  }, [loadEmiAccounts]);
+
   // Compute Weekly AI Priorities
   const recoveryData = useMemo(() => {
     return generateWeeklyRecoveryPriorities(customers, transactions, shop, language);
@@ -74,8 +94,57 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
 
   const deliveryProvider = useMemo(() => new WhatsAppDirectLinkProvider(), []);
 
-  // Derived EMI records for demonstration from existing customer list
+  // Map real Supabase EMI accounts to EMIRecord UI structures
   const emiRecords = useMemo<EMIRecord[]>(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    if (realEmiAccounts.length > 0) {
+      return realEmiAccounts.map((acc) => {
+        const insts = acc.installments || [];
+        const customer = acc.customer || {
+          id: acc.customer_id,
+          shop_id: acc.shop_id,
+          name: 'Customer',
+          phone_number: '',
+          display_label: 'Customer',
+          created_at: new Date().toISOString(),
+        };
+
+        const totalPaid = insts.reduce((sum, i) => sum + (Number(i.paid_amount) || 0), 0);
+        const remainingAmount = Math.max((Number(acc.financed_amount) || 0) - totalPaid, 0);
+
+        const nextDueInst = insts.find((i) => i.status !== 'paid' && (Number(i.paid_amount) || 0) < (Number(i.amount) || 0));
+
+        let status: EMIRecord['status'] = 'active';
+        if (remainingAmount <= 0) {
+          status = 'completed';
+        } else if (nextDueInst) {
+          if (nextDueInst.due_date === todayStr || nextDueInst.status === 'due_today') {
+            status = 'due_today';
+          } else if (nextDueInst.due_date < todayStr || nextDueInst.status === 'overdue') {
+            status = 'overdue';
+          } else {
+            status = 'upcoming';
+          }
+        }
+
+        return {
+          id: acc.id,
+          productName: acc.product_name,
+          customer,
+          totalAmount: Number(acc.total_amount) || 0,
+          paidAmount: (Number(acc.down_payment) || 0) + totalPaid,
+          remainingAmount,
+          emiNumber: nextDueInst ? nextDueInst.installment_number : acc.installment_count,
+          totalEmiCount: acc.installment_count,
+          nextDueDate: nextDueInst ? nextDueInst.due_date : acc.start_date,
+          status,
+          rawAccount: acc,
+        };
+      });
+    }
+
+    // Fallback sample EMI records if database has no accounts yet
     const products = ['Smartphone 128GB', 'Store Ration List', 'Grocery Items', 'Clothing Package', 'TV / Home Appliance', 'Ceiling Fan'];
     return customers.map((c, index) => {
       const balance = c.balance || 0;
@@ -96,7 +165,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
       const dateStr = dueDate.toISOString().split('T')[0];
 
       return {
-        id: `emi-${c.id}`,
+        id: `sample-emi-${c.id}`,
         productName: products[index % products.length],
         customer: c,
         totalAmount,
@@ -108,11 +177,28 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
         status,
       };
     });
-  }, [customers]);
+  }, [realEmiAccounts, customers]);
 
+  // Deterministically sort EMI list: OVERDUE first -> DUE TODAY second -> UPCOMING third -> COMPLETED last
   const filteredEmiList = useMemo(() => {
-    if (emiFilter === 'all') return emiRecords;
-    return emiRecords.filter((e) => e.status === emiFilter);
+    let list = [...emiRecords];
+    if (emiFilter !== 'all') {
+      list = list.filter((e) => e.status === emiFilter);
+    }
+
+    const priorityRank = (s: EMIRecord['status']) => {
+      if (s === 'overdue') return 1;
+      if (s === 'due_today') return 2;
+      if (s === 'upcoming' || s === 'active' || s === 'partially_paid') return 3;
+      return 4; // completed
+    };
+
+    return list.sort((a, b) => {
+      const rankA = priorityRank(a.status);
+      const rankB = priorityRank(b.status);
+      if (rankA !== rankB) return rankA - rankB;
+      return a.nextDueDate.localeCompare(b.nextDueDate);
+    });
   }, [emiRecords, emiFilter]);
 
   // Filtered Regular List & Priority Counts
@@ -294,7 +380,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
       {/* Priority List Section */}
       {activeTab === 'emi' ? (
         <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3 gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3 gap-3">
             <div>
               <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center">
                 <CreditCard className="w-4 h-4 mr-1.5 text-emerald-600" />
@@ -305,32 +391,58 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
               </p>
             </div>
 
-            <div className="flex space-x-1 flex-wrap gap-y-1">
-              {(['all', 'due_today', 'overdue', 'active', 'completed'] as const).map((filterKey) => (
-                <button
-                  key={filterKey}
-                  onClick={() => setEmiFilter(filterKey)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-extrabold uppercase transition-all min-h-[36px] ${
-                    emiFilter === filterKey
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                  }`}
-                >
-                  {filterKey === 'due_today' ? (language === 'bn' ? 'আজ দিতে হবে' : 'Due Today') :
-                   filterKey === 'overdue' ? (language === 'bn' ? 'বকেয়া' : 'Overdue') :
-                   filterKey === 'active' ? (language === 'bn' ? 'রানিং' : 'Active') :
-                   filterKey === 'completed' ? (language === 'bn' ? 'পরিশোধিত' : 'Completed') :
-                   (language === 'bn' ? 'সব' : 'All')}
-                </button>
-              ))}
+            <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (planTier === 'free' && realEmiAccounts.length >= (entitlements.emiLimit || 5)) {
+                    alert(`Your FREE plan allows up to ${entitlements.emiLimit || 5} active EMI accounts. Please upgrade to Pro (₹49/mo) for more.`);
+                    onOpenSubscriptions();
+                    return;
+                  }
+                  setIsEMIFormOpen(true);
+                }}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5 min-h-[44px]"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{language === 'bn' ? 'EMI যোগ করুন' : 'Create EMI Plan'}</span>
+              </button>
+
+              <div className="flex space-x-1 flex-wrap gap-y-1">
+                {(['all', 'due_today', 'overdue', 'active', 'completed'] as const).map((filterKey) => (
+                  <button
+                    key={filterKey}
+                    onClick={() => setEmiFilter(filterKey)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-extrabold uppercase transition-all min-h-[36px] ${
+                      emiFilter === filterKey
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    {filterKey === 'due_today' ? (language === 'bn' ? 'আজ দিতে হবে' : 'Due Today') :
+                     filterKey === 'overdue' ? (language === 'bn' ? 'বকেয়া' : 'Overdue') :
+                     filterKey === 'active' ? (language === 'bn' ? 'রানিং' : 'Active') :
+                     filterKey === 'completed' ? (language === 'bn' ? 'পরিশোধিত' : 'Completed') :
+                     (language === 'bn' ? 'সব' : 'All')}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
           {/* EMI List */}
           <div className="space-y-3">
             {filteredEmiList.length === 0 && (
-              <div className="p-8 text-center text-slate-400 text-xs font-bold">
-                No EMI records found in this filter.
+              <div className="p-8 text-center text-slate-400 text-xs font-bold space-y-2">
+                <div>{language === 'bn' ? 'কোন কিস্তি হিসাব পাওয়া যায়নি' : 'No EMI records found in this filter.'}</div>
+                <button
+                  type="button"
+                  onClick={() => setIsEMIFormOpen(true)}
+                  className="px-4 py-2 bg-purple-600 text-white font-extrabold text-xs rounded-xl shadow-md inline-flex items-center space-x-1 min-h-[44px]"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{language === 'bn' ? 'প্রথম EMI যোগ করুন' : 'Add First EMI Plan'}</span>
+                </button>
               </div>
             )}
 
@@ -342,7 +454,12 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
               return (
                 <div
                   key={record.id}
-                  className={`p-4 rounded-2xl border-2 transition-all space-y-3 ${
+                  onClick={() => {
+                    if (record.rawAccount) {
+                      setSelectedEMIAccount(record.rawAccount);
+                    }
+                  }}
+                  className={`p-4 rounded-2xl border-2 transition-all space-y-3 cursor-pointer hover:shadow-md ${
                     isOverdue
                       ? 'border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/30'
                       : isDueToday
@@ -373,7 +490,10 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                                 : 'bg-blue-200 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
                             }`}
                           >
-                            {record.status.replace('_', ' ')}
+                            {isOverdue ? (language === 'bn' ? '🔴 ৫ দিন বকেয়া' : '🔴 Overdue') :
+                             isDueToday ? (language === 'bn' ? '🟠 আজ দিতে হবে' : '🟠 Due Today') :
+                             isCompleted ? (language === 'bn' ? '✓ সম্পূর্ণ পরিশোধিত' : '✓ Completed') :
+                             (language === 'bn' ? '🟢 রানিং' : '🟢 Active')}
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
@@ -382,13 +502,15 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                       </div>
                     </div>
 
-                    <div className="text-left sm:text-right shrink-0">
-                      <div className="text-lg font-black text-slate-900 dark:text-white">
-                        {formatShopCurrency(record.remainingAmount, shop.country, shop.currency_code)}
+                      <div className="text-left sm:text-right shrink-0">
+                        <div className="text-lg font-black text-slate-900 dark:text-white">
+                          {formatShopCurrency(record.remainingAmount, shop.country, shop.currency_code)}
+                        </div>
+                        <div className="text-[10px] font-bold text-slate-400">
+                          {language === 'bn' ? 'অবশিষ্ট বকেয়া' : 'Remaining Balance'}
+                        </div>
                       </div>
-                      <div className="text-[10px] font-bold text-slate-400">Remaining Balance</div>
                     </div>
-                  </div>
 
                   {/* EMI Detail Grid */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-white/80 dark:bg-slate-900/60 rounded-xl text-xs font-semibold border border-slate-200/60 dark:border-slate-700/60">
@@ -416,11 +538,17 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                       Installment: {formatShopCurrency(record.remainingAmount / record.totalEmiCount, shop.country, shop.currency_code)} / mo
                     </span>
                     <button
-                      onClick={() => handleSendEmiWA(record)}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (record.rawAccount) {
+                          setSelectedEMIAccount(record.rawAccount);
+                        }
+                      }}
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors flex items-center space-x-1.5 min-h-[44px]"
                     >
                       <Send className="w-3.5 h-3.5" />
-                      <span>Send EMI Reminder</span>
+                      <span>{language === 'bn' ? 'কিস্তি হিসাব দেখুন' : 'View Schedule'}</span>
                     </button>
                   </div>
                 </div>
@@ -430,29 +558,32 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3 gap-2">
             <div>
               <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center">
                 <TrendingUp className="w-4 h-4 mr-1.5 text-purple-600" />
-                Weekly Ranked Recovery Priorities ({filteredList.length})
+                {language === 'bn' ? 'বকেয়া আদায় পরামর্শ (Recovery Priorities)' : 'Recovery Priorities'} ({filteredList.length})
               </h3>
               <p className="text-[11px] text-slate-400 font-medium">
-                Ranked using AI transparent scoring model (Amount + Debt Age + Delay)
+                {language === 'bn' ? 'বাকি টাকা, বকেয়া দিন এবং পেমেন্ট ইতিহাস অনুযায়ী তাগাদার তালিকা' : 'Ranked using transparent recovery priority engine'}
               </p>
             </div>
 
-            <div className="flex space-x-1">
+            <div className="flex space-x-1 flex-wrap gap-y-1">
               {(['all', 'high', 'medium', 'low'] as const).map((tier) => (
                 <button
                   key={tier}
                   onClick={() => setSelectedTierFilter(tier)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-extrabold uppercase transition-all ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-extrabold uppercase transition-all min-h-[36px] ${
                     selectedTierFilter === tier
                       ? 'bg-purple-600 text-white'
                       : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
                   }`}
                 >
-                  {tier}
+                  {tier === 'high' ? (language === 'bn' ? '🔴 আজই মনে করান' : '🔴 High') :
+                   tier === 'medium' ? (language === 'bn' ? '🟠 শীঘ্রই মনে করান' : '🟠 Medium') :
+                   tier === 'low' ? (language === 'bn' ? '🟢 এখন দরকার নেই' : '🟢 Low') :
+                   (language === 'bn' ? 'সব' : 'All')}
                 </button>
               ))}
             </div>
@@ -464,9 +595,13 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
               <div className="flex items-center space-x-3">
                 <Lock className="w-5 h-5 text-amber-600 shrink-0" />
                 <div>
-                  <div className="font-extrabold text-xs">Free Plan Preview Mode</div>
+                  <div className="font-extrabold text-xs">
+                    {language === 'bn' ? 'ফ্রি প্ল্যান মোড (Top 3 Priority Preview)' : 'Free Plan Preview Mode'}
+                  </div>
                   <div className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                    Upgrade to Pro ({planDetails.priceFormatted}) to unlock Top 15 automated weekly priorities!
+                    {language === 'bn'
+                      ? `প্রো প্ল্যানে (${planDetails.priceFormatted}) আপগ্রেড করে শীর্ষ ২৫টি বকেয়া অগ্রাধিকার পান!`
+                      : `Upgrade to Pro (${planDetails.priceFormatted}) to unlock Top 25 recovery priorities!`}
                   </div>
                 </div>
               </div>
@@ -475,7 +610,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                 onClick={onOpenSubscriptions}
                 className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-xs shrink-0 transition-colors min-h-[44px]"
               >
-                Upgrade
+                {language === 'bn' ? 'আপগ্রেড করুন' : 'Upgrade'}
               </button>
             </div>
           )}
@@ -484,7 +619,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
           <div className="space-y-3">
             {filteredList.length === 0 && (
               <div className="p-8 text-center text-slate-400 text-xs font-bold">
-                No overdue customers in this priority filter.
+                {language === 'bn' ? 'এই ফিল্টারে কোনো অনাদায়ী কাস্টমার পাওয়া যায়নি' : 'No overdue customers in this priority filter.'}
               </div>
             )}
 
@@ -507,7 +642,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center space-x-3 min-w-0 flex-1">
                       <div
-                        className={`w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${
+                        className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${
                           isHigh
                             ? 'bg-rose-600 text-white'
                             : isMed
@@ -519,11 +654,11 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                          <h4 className="font-extrabold text-slate-900 dark:text-white text-sm sm:text-base truncate max-w-[160px] sm:max-w-none">
+                          <h4 className="font-extrabold text-slate-900 dark:text-white text-base truncate max-w-[180px] sm:max-w-none">
                             {item.customer.display_label}
                           </h4>
                           <span
-                            className={`font-black text-[9px] uppercase px-2 py-0.5 rounded-full shrink-0 ${
+                            className={`font-black text-[10px] uppercase px-2.5 py-0.5 rounded-full shrink-0 ${
                               isHigh
                                 ? 'bg-rose-200 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
                                 : isMed
@@ -531,70 +666,89 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                                 : 'bg-emerald-200 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                             }`}
                           >
-                            Priority {item.score}/100
+                            {language === 'bn' ? item.priorityLabelBn : item.priorityLabelEn}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
-                          {item.customer.phone_number} • Overdue: {item.oldestUnpaidDays} days
+                        <p className="text-xs text-slate-500 dark:text-slate-400 font-bold truncate">
+                          📞 {item.customer.phone_number} • ⏳ {language === 'bn' ? `${item.oldestUnpaidDays} দিন অনাদায়ী` : `${item.oldestUnpaidDays} days overdue`}
                         </p>
                       </div>
                     </div>
 
                     <div className="text-left sm:text-right shrink-0">
-                      <div className="text-lg font-black text-rose-600 dark:text-rose-400">
+                      <div className="text-xl font-black text-rose-600 dark:text-rose-400">
                         {formatShopCurrency(item.outstandingBalance, shop.country, shop.currency_code)}
                       </div>
-                      <div className="text-[10px] font-bold text-slate-400">Outstanding Balance</div>
+                      <div className="text-[10px] font-bold text-slate-400">
+                        {language === 'bn' ? 'মোট বাকি টাকা' : 'Outstanding Balance'}
+                      </div>
                     </div>
                   </div>
 
-                  {/* AI Business Explanation & Reasons */}
-                  <div className="p-3 bg-white/80 dark:bg-slate-900/60 rounded-xl text-xs text-slate-700 dark:text-slate-300 font-medium border border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
+                  {/* AI Business Explanation & Action Recommendation Box */}
+                  <div className="p-3 bg-white/80 dark:bg-slate-900/60 rounded-xl text-xs text-slate-700 dark:text-slate-300 font-medium border border-slate-200/60 dark:border-slate-700/60 space-y-2">
                     <div className="flex items-start space-x-2 font-bold text-slate-900 dark:text-white">
                       <Brain className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-                      <span>AI Insight: {item.explanation}</span>
-                    </div>
-
-                    {/* Bulleted Human-Readable Reasons */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] text-slate-600 dark:text-slate-400 pl-6">
-                      {item.reasons.map((reason, idx) => (
-                        <span key={idx} className="break-words">{reason}</span>
-                      ))}
+                      <div>
+                        <span className="font-black text-purple-700 dark:text-purple-300 block">
+                          {language === 'bn' ? 'আজ কী করবেন?' : 'What to do today?'}
+                        </span>
+                        <p className="text-xs text-slate-600 dark:text-slate-300 font-semibold pt-0.5">
+                          {item.explanation}
+                        </p>
+                      </div>
                     </div>
 
                     {/* Action Recommendation & Cooldown Badge */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[11px] gap-1.5">
-                      <span className="font-extrabold text-purple-600 dark:text-purple-400 flex items-center">
-                        💡 Action: {item.recommendedAction}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[11px] gap-1.5 font-bold">
+                      <span className="text-purple-600 dark:text-purple-400 flex items-center">
+                        💡 {language === 'bn' ? `পরামর্শ: ${item.recommendedActionBn}` : `Action: ${item.recommendedAction}`}
                       </span>
                       {item.cooldownActive && (
                         <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold px-2 py-0.5 rounded-full text-[10px] shrink-0 self-start sm:self-auto">
-                          ⏳ Cooldown Active ({item.cooldownDaysRemaining}d remaining)
+                          ⏳ {language === 'bn' ? `কুলডাউন বাকি (${item.cooldownDaysRemaining} দিন)` : `Cooldown (${item.cooldownDaysRemaining}d remaining)`}
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Action Bar */}
+                  {/* Action Buttons Bar: WhatsApp + Call */}
                   {!isEditing ? (
-                    <div className="flex items-center justify-between pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingAnalysis(item);
-                          setCustomMsgText(item.suggestedMessage);
-                        }}
-                        className="text-xs font-bold text-purple-600 dark:text-purple-400 hover:underline min-h-[44px]"
-                      >
-                        ✏️ Review / Edit Reminder
-                      </button>
+                    <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (item.customer.phone_number) {
+                              window.open(`tel:${item.customer.phone_number}`, '_self');
+                            } else {
+                              alert(language === 'bn' ? 'ফোন নম্বর পাওয়া যায়নি' : 'No phone number available');
+                            }
+                          }}
+                          className="px-3.5 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 font-extrabold text-xs rounded-xl border border-blue-200 dark:border-blue-800 transition-colors flex items-center space-x-1.5 min-h-[44px]"
+                        >
+                          <span>📞 {language === 'bn' ? 'কল দিন' : 'Call'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingAnalysis(item);
+                            setCustomMsgText(item.suggestedMessage);
+                          }}
+                          className="text-xs font-bold text-purple-600 dark:text-purple-400 hover:underline min-h-[44px] px-2"
+                        >
+                          ✏️ {language === 'bn' ? 'মেসেজ এডিট করুন' : 'Edit Message'}
+                        </button>
+                      </div>
 
                       <button
+                        type="button"
                         onClick={() => handleSendWA(item)}
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors flex items-center space-x-1.5 min-h-[44px]"
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center space-x-1.5 min-h-[44px]"
                       >
                         <Send className="w-3.5 h-3.5" />
-                        <span>Approve & Send WA</span>
+                        <span>💬 {language === 'bn' ? 'হোয়াটসঅ্যাপ রিমাইন্ডার' : 'Send WhatsApp'}</span>
                       </button>
                     </div>
                   ) : (
@@ -612,7 +766,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                           onClick={() => setEditingAnalysis(null)}
                           className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-lg min-h-[44px]"
                         >
-                          Cancel
+                          {language === 'bn' ? 'বাতিল' : 'Cancel'}
                         </button>
                         <button
                           type="button"
@@ -620,7 +774,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                           className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-extrabold rounded-lg flex items-center space-x-1 min-h-[44px]"
                         >
                           <Send className="w-3.5 h-3.5" />
-                          <span>Confirm & Send WA</span>
+                          <span>💬 {language === 'bn' ? 'হোয়াটসঅ্যাপ পাঠাল' : 'Send WhatsApp'}</span>
                         </button>
                       </div>
                     </div>
@@ -630,6 +784,36 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
             })}
           </div>
         </div>
+      )}
+
+      {/* EMI Creation Form Modal */}
+      {isEMIFormOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <EMIForm
+            shop={shop}
+            customers={customers}
+            language={language}
+            onSuccess={() => {
+              setIsEMIFormOpen(false);
+              loadEmiAccounts();
+            }}
+            onCancel={() => setIsEMIFormOpen(false)}
+          />
+        </div>
+      )}
+
+      {/* EMI Account Inspection & Payment Modal */}
+      {selectedEMIAccount && (
+        <EMIAccountDetail
+          shop={shop}
+          account={selectedEMIAccount}
+          language={language}
+          onClose={() => setSelectedEMIAccount(null)}
+          onPaymentSuccess={() => {
+            loadEmiAccounts();
+            setSelectedEMIAccount(null);
+          }}
+        />
       )}
     </div>
   );

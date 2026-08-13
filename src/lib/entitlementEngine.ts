@@ -7,6 +7,7 @@ export interface EntitlementLimits {
   planName: string;
   campaignRecipientLimit: number;
   weeklyAiQuota: number;
+  emiLimit: number;
   customerLimit: number;
   txMonthlyLimit: number;
   shopLimit: number;
@@ -36,11 +37,14 @@ export class EntitlementService {
       ? countryPlan.weeklyAiQuota
       : (tier === 'free' ? 0 : tier === 'pro' ? 15 : 100);
 
+    const emiLimit = tier === 'free' ? 5 : tier === 'pro' ? 50 : 1000;
+
     return {
       tier,
       planName: tier === 'business' ? 'Business Plan' : planInfo.name,
       campaignRecipientLimit: recipientLimit,
       weeklyAiQuota,
+      emiLimit,
       customerLimit: planInfo.customerLimit,
       txMonthlyLimit: planInfo.txMonthlyLimit,
       shopLimit: planInfo.shopLimit,

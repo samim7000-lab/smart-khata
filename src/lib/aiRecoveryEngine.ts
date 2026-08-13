@@ -6,6 +6,8 @@ export interface AIRecoveryAnalysis {
   customer: Customer;
   score: number; // 0 to 100
   priorityTier: 'high' | 'medium' | 'low';
+  priorityLabelBn: string; // 'আজই মনে করান' | 'শীঘ্রই মনে করান' | 'এখন দরকার নেই'
+  priorityLabelEn: string; // 'Immediate Reminder' | 'Follow Up Soon' | 'No Rush'
   outstandingBalance: number;
   oldestUnpaidDays: number;
   daysSinceLastPayment: number;
@@ -13,6 +15,7 @@ export interface AIRecoveryAnalysis {
   reasons: string[];
   explanation: string;
   recommendedAction: string;
+  recommendedActionBn: string;
   suggestedMessage: string;
   cooldownActive: boolean;
   cooldownDaysRemaining: number;
@@ -50,8 +53,7 @@ export function recordReminderSent(customerId: string): void {
 }
 
 /**
- * Calculate AI Payment Recovery Priority Score (0-100), Human-Readable Reasons & Cooldown
- * Note: Balances are calculated 100% from ledger DB records.
+ * Calculate Deterministic Recovery Priority Score (0-100), Explanations & Action Recommendations
  */
 export function analyzeCustomerRecovery(
   customer: Customer,
@@ -84,7 +86,7 @@ export function analyzeCustomerRecovery(
     daysSinceLastPayment = Math.max(0, Math.floor((now - latestPaymentTime) / (1000 * 60 * 60 * 24)));
   }
 
-  // 3. Check Cooldown (7 days cooldown threshold)
+  // 3. Check Cooldown (7 days threshold)
   const lastSentIso = getLastReminderTime(customer.id);
   let cooldownActive = false;
   let cooldownDaysRemaining = 0;
@@ -98,8 +100,8 @@ export function analyzeCustomerRecovery(
     }
   }
 
-  // 4. Compute Transparent AI Priority Score (0 - 100)
-  // Amount weight (40%), Age weight (40%), Delay weight (20%)
+  // 4. Compute Transparent Deterministic Priority Score (0 - 100)
+  // Formula: Amount weight (40%), Age weight (40%), Payment Delay weight (20%)
   const amountScore = Math.min(40, (balance / 5000) * 40);
   const ageScore = Math.min(40, (oldestUnpaidDays / 30) * 40);
   const delayScore = Math.min(20, (daysSinceLastPayment / 20) * 20);
@@ -107,61 +109,72 @@ export function analyzeCustomerRecovery(
   const rawScore = Math.round(amountScore + ageScore + delayScore);
   const score = Math.min(99, Math.max(15, rawScore));
 
-  // Determine Priority Tier
-  const priorityTier: 'high' | 'medium' | 'low' =
-    score >= 80 ? 'high' : score >= 50 ? 'medium' : 'low';
+  // Priority Tiers & Bengali Labels
+  let priorityTier: 'high' | 'medium' | 'low' = 'low';
+  let priorityLabelBn = 'এখন দরকার নেই';
+  let priorityLabelEn = 'No Rush';
+
+  if (score >= 75 || oldestUnpaidDays >= 10) {
+    priorityTier = 'high';
+    priorityLabelBn = '🔴 আজই মনে করান';
+    priorityLabelEn = '🔴 Immediate Reminder';
+  } else if (score >= 45 || oldestUnpaidDays >= 3) {
+    priorityTier = 'medium';
+    priorityLabelBn = '🟠 শীঘ্রই মনে করান';
+    priorityLabelEn = '🟠 Follow Up Soon';
+  } else {
+    priorityTier = 'low';
+    priorityLabelBn = '🟢 এখন দরকার নেই';
+    priorityLabelEn = '🟢 No Rush';
+  }
 
   // Format currency strictly by shop country/currency code
   const formattedBal = formatShopCurrency(balance, shop.country, shop.currency_code);
 
-  // 5. Human-Readable Explanatory Reasons Array
+  // 5. Explanatory Reasons Array
   const reasons: string[] = [
-    `• ${formattedBal} outstanding balance`,
-    `• ${oldestUnpaidDays} days overdue`,
-    `• ${custTxs.length} total ledger transactions`,
+    `• ${formattedBal} বাকি টাকা`,
+    `• ${oldestUnpaidDays} দিন অনাদায়ী (Overdue)`,
+    `• মোট ${custTxs.length}টি লেনেদেন হিসাব`,
   ];
 
   if (daysSinceLastPayment < 999) {
-    reasons.push(`• Last payment received ${daysSinceLastPayment} days ago`);
+    reasons.push(`• সর্বশেষ জমা: ${daysSinceLastPayment} দিন আগে`);
   } else {
-    reasons.push(`• No payment recorded yet`);
+    reasons.push(`• পূর্বে কোনো পেমেন্ট জমা হয়নি`);
   }
 
-  // Generate Business Explanation based on Language
+  // Generate Business Explanation
   let explanation = '';
   if (language === 'bn') {
-    explanation = score >= 80
-      ? `উচ্চ অগ্রাধিকার: ${formattedBal} বকেয়া টাকা ${oldestUnpaidDays} দিন ধরে অনাদায়ী রয়েছে।`
-      : score >= 50
-      ? `মাঝারি অগ্রাধিকার: ${formattedBal} বকেয়া পেন্ডিং রয়েছে।`
-      : `সাধারণ বকেয়া ${formattedBal} স্বাভাবিক সময়সীমার মধ্যে রয়েছে।`;
-  } else if (language === 'hi') {
-    explanation = score >= 80
-      ? `उच्च प्राथमिकता: ${formattedBal} का बकाया ${oldestUnpaidDays} दिनों से भुगतान नहीं हुआ है।`
-      : score >= 50
-      ? `मध्यम प्राथमिकता: ${formattedBal} का बकाया लंबित है।`
-      : `सामान्य बकाया ${formattedBal} सामान्य समय सीमा में है।`;
+    explanation = `${formattedBal} বাকি এবং ${oldestUnpaidDays} দিন অনাদায়ী — ${
+      priorityTier === 'high' ? 'আজ মনে করানো ভালো।' : 'শীঘ্রই তদারকি করুন।'
+    }`;
   } else {
-    explanation = score >= 80
-      ? `High priority because ${formattedBal} has remained unpaid for ${oldestUnpaidDays} days.`
-      : score >= 50
-      ? `Medium priority due to pending ${formattedBal} with last payment ${daysSinceLastPayment === 999 ? 'none' : `${daysSinceLastPayment} days ago`}.`
-      : `Low priority balance of ${formattedBal} within normal payment timeline.`;
+    explanation = `${formattedBal} balance unpaid for ${oldestUnpaidDays} days — ${
+      priorityTier === 'high' ? 'Recommended to contact today.' : 'Follow up soon.'
+    }`;
   }
 
   // Action Recommendation based on Cooldown & Score
   let recommendedAction = '';
+  let recommendedActionBn = '';
+
   if (cooldownActive) {
-    recommendedAction = `Do Not Remind Yet (${cooldownDaysRemaining} days cooldown left)`;
-  } else if (score >= 80) {
-    recommendedAction = 'Immediate Payment Reminder Recommended';
-  } else if (score >= 50) {
-    recommendedAction = 'Follow-Up Reminder Recommended';
+    recommendedAction = `Wait (${cooldownDaysRemaining} days cooldown left)`;
+    recommendedActionBn = `অপেক্ষা করুন (${cooldownDaysRemaining} দিন কুলডাউন বাকি)`;
+  } else if (priorityTier === 'high') {
+    recommendedAction = 'Send WhatsApp Reminder or Call';
+    recommendedActionBn = 'আজই হোয়াটসঅ্যাপে রিমাইন্ডার পাঠান বা কল দিন';
+  } else if (priorityTier === 'medium') {
+    recommendedAction = 'Follow up with customer';
+    recommendedActionBn = 'কাস্টমারের সাথে কথা বলুন';
   } else {
-    recommendedAction = 'Friendly Update Recommended';
+    recommendedAction = 'No immediate action required';
+    recommendedActionBn = 'এখনই কোনো তাগাদা দেওয়ার দরকার নেই';
   }
 
-  // Respectful Reminder Message Template based on App Language
+  // Respectful Reminder Message Template
   let rawTemplate = '';
   if (language === 'bn') {
     rawTemplate =
@@ -180,6 +193,8 @@ export function analyzeCustomerRecovery(
     customer,
     score,
     priorityTier,
+    priorityLabelBn,
+    priorityLabelEn,
     outstandingBalance: balance,
     oldestUnpaidDays,
     daysSinceLastPayment,
@@ -187,6 +202,7 @@ export function analyzeCustomerRecovery(
     reasons,
     explanation,
     recommendedAction,
+    recommendedActionBn,
     suggestedMessage,
     cooldownActive,
     cooldownDaysRemaining,
@@ -195,8 +211,7 @@ export function analyzeCustomerRecovery(
 }
 
 /**
- * Generate Weekly AI Recovery Priorities ranked by score
- * Enforces Weekly Quota based on plan tier (Free: 3 preview, Pro: 25, Business: Unlimited)
+ * Generate Recovery Priorities ranked by score
  */
 export function generateWeeklyRecoveryPriorities(
   customers: Customer[],
