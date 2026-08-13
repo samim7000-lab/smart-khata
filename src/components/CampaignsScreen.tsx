@@ -119,6 +119,10 @@ export const CampaignsScreen: React.FC<Props> = ({
     return 'Dear {{customer_name}},\n\nThis is a friendly update from {{store_name}}. Your current pending balance is {{due_amount}} as of {{today}}.\n\nShop Address: {{shop_address}}\nInvoice Ref: {{invoice_number}}\n\nThank you!';
   };
 
+  // 5-Step Campaign Wizard State
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [campaignGoal, setCampaignGoal] = useState<'new_product' | 'discount' | 'festival' | 'bring_back' | 'loyal' | 'old_stock'>('new_product');
+
   // Message Composer State
   const [messageText, setMessageText] = useState(() => getDefaultCampaignMessage(language));
 
@@ -456,8 +460,108 @@ export const CampaignsScreen: React.FC<Props> = ({
       </div>
 
       {activeTab === 'builder' ? (
-        /* Main Campaign Builder Grid */
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <div className="space-y-4">
+          {/* 5-Step Campaign Wizard Progress Header */}
+          <div className="bg-white dark:bg-slate-800 p-4 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs space-y-3">
+            <div className="flex items-center justify-between overflow-x-auto pb-1 no-scrollbar gap-2">
+              {[
+                { step: 1, title: language === 'bn' ? '১. অফার টাইপ' : '1. Goal', desc: 'What to do?' },
+                { step: 2, title: language === 'bn' ? '২. কাস্টমার' : '2. Audience', desc: 'Who receives?' },
+                { step: 3, title: language === 'bn' ? '৩. মেসেজ' : '3. Message', desc: 'Preview' },
+                { step: 4, title: language === 'bn' ? '৪. রিভিউ' : '4. Review', desc: 'Check' },
+                { step: 5, title: language === 'bn' ? '৫. সেন্ড / শিডিউল' : '5. Send', desc: 'Dispatch' },
+              ].map((s) => {
+                const isCurrent = wizardStep === s.step;
+                const isCompleted = wizardStep > s.step;
+                return (
+                  <button
+                    key={s.step}
+                    type="button"
+                    onClick={() => setWizardStep(s.step as any)}
+                    className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 min-h-[44px] ${
+                      isCurrent
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : isCompleted
+                        ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                        : 'bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
+                      isCurrent ? 'bg-white text-blue-600 font-black' : isCompleted ? 'bg-emerald-600 text-white' : 'bg-slate-300 dark:bg-slate-600 text-slate-800'
+                    }`}>
+                      {s.step}
+                    </span>
+                    <span className="truncate">{s.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* STEP 1: What do you want to do? (Goal / Offer Type) */}
+          {wizardStep === 1 && (
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center">
+                    <Sparkles className="w-5 h-5 text-yellow-500 mr-2" />
+                    {language === 'bn' ? 'ধাপ ১: আপনি কি করতে চান?' : language === 'hi' ? 'चरण 1: आप क्या करना चाहते हैं?' : 'Step 1: What do you want to do?'}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                    {language === 'bn' ? 'আপনার ক্যাম্পেইনের মূল উদ্দেশ্য নির্বাচন করুন' : 'Select the primary goal of your promotion'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {[
+                  { id: 'new_product', title: 'New Product', icon: '📦', bn: 'নতুন পণ্য ঘোষণা', desc: 'Announce new arrivals to your customers' },
+                  { id: 'discount', title: 'Discount / Sale', icon: '🏷️', bn: 'ছাড় / বিশেষ ডিসকাউন্ট', desc: 'Send percentage or cash discounts' },
+                  { id: 'festival', title: 'Festival Offer', icon: '🎉', bn: 'উৎসবের অফার (Eid / Puja / Diwali)', desc: 'Greet & offer festival discounts' },
+                  { id: 'bring_back', title: 'Bring Back Inactive', icon: '🔄', bn: 'পুরাতন কাস্টমার ফেরত আনুন', desc: 'Re-engage customers who havent visited' },
+                  { id: 'loyal', title: 'Loyal Customer Offer', icon: '⭐', bn: 'নিয়মিত কাস্টমার বিশেষ অফার', desc: 'Reward your top VIP repeat buyers' },
+                  { id: 'old_stock', title: 'Stock Clearance', icon: '🧹', bn: 'পুরানো স্টক ক্লিয়ারেন্স', desc: 'Sell remaining stock fast at special price' },
+                ].map((g) => {
+                  const isSel = campaignGoal === g.id;
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setCampaignGoal(g.id as any)}
+                      className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between space-y-2 min-h-[80px] ${
+                        isSel
+                          ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/60 shadow-md'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-blue-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span className="text-2xl">{g.icon}</span>
+                        <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                          {language === 'bn' ? g.bn : g.title}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{g.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="pt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setWizardStep(2)}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm rounded-2xl shadow-lg flex items-center space-x-2 transition-all min-h-[44px]"
+                >
+                  <span>{language === 'bn' ? 'পরবর্তী: কাস্টমার নির্বাচন' : 'Next: Select Audience'}</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Main Campaign Builder Grid (Visible on Steps 2-5) */}
+          {wizardStep >= 2 && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Left Column: Customer Selector & Limit Counter (6 cols) */}
           <div className="lg:col-span-6 space-y-4">
             <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs space-y-4">
@@ -691,9 +795,11 @@ export const CampaignsScreen: React.FC<Props> = ({
                 <span>Review Campaign & Launch ({selectedCustomerIds.size} Selected)</span>
               </button>
             </div>
+            </div>
           </div>
-        </div>
-      ) : (
+        )}
+      </div>
+    ) : (
         /* Campaign History Tab */
         <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
