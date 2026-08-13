@@ -10,10 +10,8 @@ export function isShopProfileComplete(shop: Partial<Shop> | null): boolean {
   const hasShopName = !!(shop.shop_name && shop.shop_name.trim().length > 0);
   const hasOwnerName = !!(shop.owner_name && shop.owner_name.trim().length > 0);
   const hasCountry = !!(shop.country && shop.country.trim().length > 0);
-  const hasPhone = !!(
-    (shop.phone && shop.phone.trim().length >= 8) ||
-    (shop.whatsapp_number && shop.whatsapp_number.trim().length >= 8)
-  );
+  const rawPhone = (shop.whatsapp_number || shop.phone || '').trim();
+  const hasPhone = rawPhone.length >= 6;
 
   return hasShopName && hasOwnerName && hasCountry && hasPhone;
 }

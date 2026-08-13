@@ -284,65 +284,68 @@ export const App: React.FC = () => {
     const initAuth = async () => {
       if (isSupabaseConfigured && supabase) {
         try {
-          // 1. Check for active session (handles OAuth callback redirect)
+          setIsAuthInitializing(true);
           const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
-          if (sessionErr) console.warn('[AUTH DEBUG] getSession error:', sessionErr.message);
+          if (sessionErr) console.warn('[AUTH] getSession error:', sessionErr.message);
 
           if (session?.user) {
-            console.log(`[AUTH DEBUG] Active session found for user: ${session.user.id}`);
+            console.log(`[AUTH] user.id = ${session.user.id}`);
             saveGoogleMetadata(session.user);
             setActiveUserId(session.user.id);
             await fetchUserShop(session.user.id);
           } else {
-            console.log('[AUTH DEBUG] No active Supabase OAuth session found on initialization');
+            console.log('[AUTH] No active Supabase OAuth session found');
             const devUserRaw = localStorage.getItem('smart_khata_dev_user');
             if (devUserRaw) {
               try {
                 const devUser = JSON.parse(devUserRaw);
                 if (devUser.id) {
-                  console.log(`[AUTH DEBUG] Restoring Development OTP user session: ${devUser.id}`);
+                  console.log(`[AUTH] Restoring Development OTP user session: ${devUser.id}`);
                   setActiveUserId(devUser.id);
                   await fetchUserShop(devUser.id);
+                  setIsAuthInitializing(false);
                   return;
                 }
               } catch {
-                // Ignore invalid dev user JSON
+                // Ignore
               }
             }
-            const savedLang = localStorage.getItem('smart_khata_lang');
-            if (savedLang) {
-              setScreen((prev) => (prev === 'main' || prev === 'customer_detail' ? 'language_select' : prev));
-            }
+            setActiveUserId(null);
+            setShop(null);
+            const savedLang = (localStorage.getItem('smart_khata_lang') as Language) || 'bn';
+            setLanguage(savedLang);
+            setScreen('language_select');
           }
         } catch (err) {
-          console.error('[AUTH DEBUG] Session initialization exception:', err);
+          console.error('[AUTH] Session initialization exception:', err);
         } finally {
           setIsAuthInitializing(false);
         }
 
-        // 2. Auth state listener for SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED events
+        // Auth state listener for SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED events
         const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-          console.log(`[AUTH DEBUG] Auth Event: ${event}, User ID: ${session?.user?.id || 'none'}`);
+          console.log(`[AUTH] Auth Event: ${event}, User ID: ${session?.user?.id || 'none'}`);
           if (session?.user) {
             saveGoogleMetadata(session.user);
             setActiveUserId(session.user.id);
 
-            // Token refresh or background user update protection:
-            // Do NOT re-trigger shop setup or clear active shop if user is already authenticated
             if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-              console.log(`[AUTH DEBUG] Background ${event} event handled without resetting UI.`);
+              console.log(`[AUTH] Background ${event} handled without UI reset.`);
               setIsAuthInitializing(false);
               return;
             }
 
+            setIsAuthInitializing(true);
             await fetchUserShop(session.user.id);
             setIsAuthInitializing(false);
           } else if (event === 'SIGNED_OUT') {
-            console.log(`[AUTH DEBUG] User signed out`);
+            console.log('[AUTH] User signed out');
             setActiveUserId(null);
             setShop(null);
             setCustomers([]);
             setTransactions([]);
+            const savedLang = (localStorage.getItem('smart_khata_lang') as Language) || 'bn';
+            setLanguage(savedLang);
             setScreen('language_select');
             setIsAuthInitializing(false);
           }
@@ -361,12 +364,12 @@ export const App: React.FC = () => {
   }, []);
 
   const fetchUserShop = async (userId: string) => {
-    console.log(`[AUTH DEBUG] fetchUserShop initiated for owner_id: ${userId}`);
+    console.log(`[AUTH] user.id = ${userId}`);
+    console.log(`[SHOP] querying owner_id = ${userId}`);
     const savedLang = (localStorage.getItem('smart_khata_lang') as Language) || null;
 
     if (isSupabaseConfigured && supabase) {
       try {
-        // Query user's shops ordered by creation date to prevent PostgREST PGRST116 errors if multiple shops exist
         const { data: shopRows, error } = await supabase
           .from('shops')
           .select('*')
@@ -374,121 +377,60 @@ export const App: React.FC = () => {
           .order('created_at', { ascending: true });
 
         if (error) {
-          console.warn('[AUTH DEBUG] Error querying shops from Supabase:', error.message);
-          // Check per-user persistent local cache before treating error as missing shop
-          const userCachedShopRaw = localStorage.getItem(`smart_khata_cached_shop_${userId}`);
-          if (userCachedShopRaw) {
-            try {
-              const cachedShop = JSON.parse(userCachedShopRaw);
-              console.log('[AUTH DEBUG] Restored user shop from local persistent cache:', cachedShop.id);
-              setShop(cachedShop);
-              setScreen('main');
-              return;
-            } catch {
-              // Ignore cache parse error
-            }
-          }
-
-          const localShop = getStoredMockShop();
-          if (localShop) {
-            console.log('[AUTH DEBUG] Falling back to local shop in DEV MODE');
-            setShop(localShop);
-            setScreen('main');
-            return;
-          }
+          console.error('[SHOP] Error querying public.shops:', error.message);
         }
 
         if (shopRows && shopRows.length > 0) {
           const primaryShopRecord = shopRows[0];
-          console.log('[AUTH DEBUG] Found existing primary shop in database:', primaryShopRecord.id);
+          console.log(`[SHOP] found shop.id = ${primaryShopRecord.id}, owner_id = ${primaryShopRecord.owner_id}, shop_name = ${primaryShopRecord.shop_name}`);
 
-          const savedOwnerProfileRaw = localStorage.getItem(`smart_khata_shop_profile_${userId}`);
-          let ownerProfileCache: Partial<Shop> = {};
-          if (savedOwnerProfileRaw) {
-            try {
-              ownerProfileCache = JSON.parse(savedOwnerProfileRaw);
-            } catch {
-              // Ignore invalid cache
-            }
-          }
+          const normalizedPhone = primaryShopRecord.phone || primaryShopRecord.whatsapp_number || '';
+          const normalizedWhatsapp = primaryShopRecord.whatsapp_number || primaryShopRecord.phone || normalizedPhone;
+          const normalizedCountry = primaryShopRecord.country || 'BD';
+          const normalizedCurrency = primaryShopRecord.currency_code || (normalizedCountry === 'BD' ? 'BDT' : 'INR');
 
-          const sanitizedCountry = primaryShopRecord.country || localStorage.getItem('smart_khata_last_country') || 'IN';
-          const sanitizedCurrency = primaryShopRecord.currency_code || (sanitizedCountry === 'BD' ? 'BDT' : 'INR');
-
-          const sanitizedShop: Shop = {
+          const dbShop: Shop = {
             ...primaryShopRecord,
-            country: sanitizedCountry,
-            currency_code: sanitizedCurrency,
-            logo_url: primaryShopRecord.logo_url || ownerProfileCache.logo_url || undefined,
-            signature_url: primaryShopRecord.signature_url || ownerProfileCache.signature_url || undefined,
-            shop_photo_url: primaryShopRecord.shop_photo_url || ownerProfileCache.shop_photo_url || undefined,
+            country: normalizedCountry,
+            currency_code: normalizedCurrency,
+            phone: normalizedPhone,
+            whatsapp_number: normalizedWhatsapp,
           };
 
-          setShop(sanitizedShop);
-          saveMockShop(sanitizedShop);
-          localStorage.setItem(`smart_khata_cached_shop_${userId}`, JSON.stringify(sanitizedShop));
+          setShop(dbShop);
+          saveMockShop(dbShop);
 
-          // Priority: 1. Explicit user choice in localStorage -> 2. Saved shop language -> 3. Fallback 'bn'
           const effectiveLang = savedLang || (primaryShopRecord.preferred_language as Language) || 'bn';
           setLanguage(effectiveLang);
           localStorage.setItem('smart_khata_lang', effectiveLang);
 
-          if (isShopProfileComplete(sanitizedShop)) {
-            localStorage.setItem('smart_khata_onboarding_completed', 'true');
+          const isComplete = isShopProfileComplete(dbShop);
+          console.log(`[PROFILE] complete = ${isComplete}`);
+
+          if (isComplete) {
+            console.log('[ROUTE] Dashboard');
             setScreen('main');
-            loadSupabaseData(primaryShopRecord.id);
+            loadSupabaseData(dbShop.id);
           } else {
-            console.log('[ONBOARDING DEBUG] User shop exists but required profile fields are incomplete. Directing to Full Profile Onboarding.');
+            console.log('[ROUTE] ShopSetup');
             setScreen('shop_setup');
           }
         } else {
-          // Check per-user persistent local cache before forcing Shop Setup
-          const userCachedShopRaw = localStorage.getItem(`smart_khata_cached_shop_${userId}`);
-          if (userCachedShopRaw) {
-            try {
-              const cachedShop = JSON.parse(userCachedShopRaw);
-              setShop(cachedShop);
-              if (isShopProfileComplete(cachedShop)) {
-                setScreen('main');
-                loadSupabaseData(cachedShop.id);
-                return;
-              }
-            } catch {
-              // Ignore cache parse error
-            }
-          }
-
-          console.log('[AUTH DEBUG] No complete shop found for user. Directing to Full Profile Onboarding.');
+          console.log(`[SHOP] no shop found in DB for owner_id = ${userId}`);
+          console.log('[PROFILE] complete = false');
+          console.log('[ROUTE] ShopSetup');
           setShop(null);
-          if (savedLang) {
-            setLanguage(savedLang);
-          }
           setScreen('shop_setup');
         }
       } catch (err) {
-        console.error('[AUTH DEBUG] Exception fetching user shop:', err);
-        const userCachedShopRaw = localStorage.getItem(`smart_khata_cached_shop_${userId}`);
-        if (userCachedShopRaw) {
-          try {
-            const cachedShop = JSON.parse(userCachedShopRaw);
-            setShop(cachedShop);
-            if (isShopProfileComplete(cachedShop)) {
-              setScreen('main');
-              return;
-            }
-          } catch {
-            // Ignore
-          }
-        }
+        console.error('[SHOP] Exception fetching user shop:', err);
+        setShop(null);
         setScreen('shop_setup');
       }
     } else {
       const localShop = getStoredMockShop();
       if (localShop && isShopProfileComplete(localShop)) {
         setShop(localShop);
-        if (savedLang) {
-          setLanguage(savedLang);
-        }
         setScreen('main');
       } else {
         setScreen('shop_setup');
@@ -702,31 +644,45 @@ export const App: React.FC = () => {
           }
 
           if (error) {
-            console.error('[REAL AUTH DEBUG] Error saving shop profile in Supabase:', error.message);
+            console.error('[ONBOARDING] Error saving shop profile in database:', error.message);
             alert('Could not save shop profile in database: ' + error.message);
             return;
           }
 
-          if (data && isValidUuid(data.id)) {
-            console.log('[REAL AUTH DEBUG] Shop profile saved successfully:', data.id);
-            const mergedShop: Shop = {
-              ...data,
-              ...newShopData,
-              id: data.id,
-              owner_id: user.id,
-              shop_name: data.shop_name || newShopData.shop_name || 'My Shop',
-              owner_name: data.owner_name || newShopData.owner_name || 'Owner',
-              country: data.country || newShopData.country || 'BD',
-              phone: data.phone || newShopData.phone || newShopData.whatsapp_number || '',
-              whatsapp_number: data.whatsapp_number || newShopData.whatsapp_number || newShopData.phone || '',
+          // Immediately re-SELECT the saved canonical row from public.shops (Requirement 10)
+          const { data: freshShopRow } = await supabase
+            .from('shops')
+            .select('*')
+            .eq('owner_id', user.id)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .single();
+
+          const finalRow = freshShopRow || data;
+          if (finalRow) {
+            const normalizedPhone = finalRow.phone || finalRow.whatsapp_number || newShopData.phone || '';
+            const normalizedWhatsapp = finalRow.whatsapp_number || finalRow.phone || newShopData.whatsapp_number || '';
+            const normalizedCountry = finalRow.country || newShopData.country || 'BD';
+            const normalizedCurrency = finalRow.currency_code || (normalizedCountry === 'BD' ? 'BDT' : 'INR');
+
+            const canonicalShop: Shop = {
+              ...finalRow,
+              country: normalizedCountry,
+              phone: normalizedPhone,
+              whatsapp_number: normalizedWhatsapp,
+              currency_code: normalizedCurrency,
             };
-            setShop(mergedShop);
-            saveMockShop(mergedShop);
-            localStorage.setItem('smart_khata_onboarding_completed', 'true');
-            localStorage.setItem(`smart_khata_cached_shop_${user.id}`, JSON.stringify(mergedShop));
-            localStorage.setItem(`smart_khata_shop_profile_${user.id}`, JSON.stringify(mergedShop));
+
+            const isComplete = isShopProfileComplete(canonicalShop);
+            console.log(`[AUTH] user.id = ${user.id}`);
+            console.log(`[SHOP] saved shop.id = ${canonicalShop.id}, owner_id = ${canonicalShop.owner_id}, shop_name = ${canonicalShop.shop_name}`);
+            console.log(`[PROFILE] complete = ${isComplete}`);
+            console.log('[ROUTE] Dashboard');
+
+            setShop(canonicalShop);
+            saveMockShop(canonicalShop);
             setScreen('main');
-            loadSupabaseData(mergedShop.id);
+            loadSupabaseData(canonicalShop.id);
             return;
           }
         } else if (activeUserId || localStorage.getItem('smart_khata_dev_user')) {
@@ -736,7 +692,7 @@ export const App: React.FC = () => {
           return;
         }
       } catch (err: any) {
-        console.error('[REAL AUTH DEBUG] Exception creating shop in Supabase:', err);
+        console.error('[ONBOARDING] Exception completing shop setup:', err);
         alert('Failed to set up shop: ' + err.message);
         return;
       }
