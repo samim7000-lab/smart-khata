@@ -148,3 +148,46 @@ export function validatePhoneNumber(
     normalizedE164,
   };
 }
+
+/**
+ * Validates optional email format if filled.
+ */
+export function validateEmail(email: string, language: Language = 'en'): { isValid: boolean; errorMsg?: string } {
+  if (!email || !email.trim()) return { isValid: true };
+  const trimmed = email.trim();
+  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  if (!isValid) {
+    return {
+      isValid: false,
+      errorMsg:
+        language === 'bn'
+          ? 'সঠিক ইমেইল অ্যাড্রেস দিন।'
+          : language === 'hi'
+          ? 'कृपया सही ईमेल पता दर्ज करें।'
+          : 'Please enter a valid email address.',
+    };
+  }
+  return { isValid: true };
+}
+
+/**
+ * Validates optional GSTIN structure if filled (for India/generic).
+ */
+export function validateGSTIN(gstNumber: string, language: Language = 'en'): { isValid: boolean; errorMsg?: string } {
+  if (!gstNumber || !gstNumber.trim()) return { isValid: true };
+  const trimmed = gstNumber.trim().toUpperCase();
+  // 15 alphanumeric format (standard Indian GSTIN format or generic length check)
+  if (trimmed.length !== 15 || !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(trimmed)) {
+    return {
+      isValid: false,
+      errorMsg:
+        language === 'bn'
+          ? 'GST নম্বরটি ১৫ অক্ষরের সঠিক ফরম্যাটে হতে হবে।'
+          : language === 'hi'
+          ? 'GST नंबर 15 अंकों का सही प्रारूप होना चाहिए।'
+          : 'GST number must be a valid 15-character format (e.g., 22AAAAA0000A1Z5).',
+    };
+  }
+  return { isValid: true };
+}
+

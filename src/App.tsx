@@ -612,17 +612,20 @@ export const App: React.FC = () => {
             shop_name: newShopData.shop_name || 'My Shop',
             owner_name: newShopData.owner_name || 'Owner',
             preferred_language: language,
-            gst_enabled: false,
+            gst_enabled: newShopData.gst_enabled || false,
           };
 
           if (newShopData.phone) fullPayload.phone = newShopData.phone;
           if (newShopData.whatsapp_number) fullPayload.whatsapp_number = newShopData.whatsapp_number;
           if (newShopData.country) fullPayload.country = newShopData.country;
           if (newShopData.currency_code) fullPayload.currency_code = newShopData.currency_code;
-          if (newShopData.business_type) fullPayload.business_type = newShopData.business_type;
+          if (newShopData.email) fullPayload.email = newShopData.email;
+          if (newShopData.gst_number) fullPayload.gst_number = newShopData.gst_number;
           if (newShopData.full_address) fullPayload.full_address = newShopData.full_address;
           if (newShopData.state) fullPayload.state = newShopData.state;
+          if (newShopData.business_type) fullPayload.business_type = newShopData.business_type;
           if (newShopData.logo_url) fullPayload.logo_url = newShopData.logo_url;
+          if (newShopData.signature_url) fullPayload.signature_url = newShopData.signature_url;
 
           let data: any = null;
           let error: any = null;
@@ -648,6 +651,42 @@ export const App: React.FC = () => {
             error = insertRes.error;
           }
 
+          // Schema cache fallback for remote database before migration execution
+          if (error && (error.message?.includes('schema cache') || error.message?.includes('column') || error.code === 'PGRST204')) {
+            console.warn('[REAL AUTH DEBUG] Extended columns not present in PostgREST schema cache. Retrying with base payload fallback...');
+            const basePayload = {
+              owner_id: user.id,
+              shop_name: newShopData.shop_name || 'My Shop',
+              owner_name: newShopData.owner_name || 'Owner',
+              preferred_language: language,
+              gst_enabled: false,
+            };
+
+            if (shop?.id && isValidUuid(shop.id)) {
+              const baseUpdateRes = await supabase
+                .from('shops')
+                .update(basePayload)
+                .eq('id', shop.id)
+                .select()
+                .single();
+              data = baseUpdateRes.data;
+              error = baseUpdateRes.error;
+            } else {
+              const baseInsertRes = await supabase
+                .from('shops')
+                .insert(basePayload)
+                .select()
+                .single();
+              data = baseInsertRes.data;
+              error = baseInsertRes.error;
+            }
+
+            // Merge local extended fields into saved data if base fallback was used
+            if (data) {
+              data = { ...data, ...newShopData };
+            }
+          }
+
           if (error) {
             console.error('[REAL AUTH DEBUG] Error saving shop profile in Supabase:', error.message);
             alert('Could not save shop profile in database: ' + error.message);
@@ -656,11 +695,20 @@ export const App: React.FC = () => {
 
           if (data && isValidUuid(data.id)) {
             console.log('[REAL AUTH DEBUG] Shop profile saved successfully:', data.id);
-            setShop(data);
+            const mergedShop: Shop = {
+              ...data,
+              ...newShopData,
+              id: data.id,
+              owner_id: user.id,
+              shop_name: data.shop_name || newShopData.shop_name || 'My Shop',
+              owner_name: data.owner_name || newShopData.owner_name || 'Owner',
+            };
+            setShop(mergedShop);
+            saveMockShop(mergedShop);
             localStorage.setItem('smart_khata_onboarding_completed', 'true');
-            localStorage.setItem(`smart_khata_cached_shop_${user.id}`, JSON.stringify(data));
+            localStorage.setItem(`smart_khata_cached_shop_${user.id}`, JSON.stringify(mergedShop));
             setScreen('main');
-            loadSupabaseData(data.id);
+            loadSupabaseData(mergedShop.id);
             return;
           }
         } else if (activeUserId || localStorage.getItem('smart_khata_dev_user')) {

@@ -3,12 +3,13 @@ import { CountryConfig, Language, Shop } from '../types';
 import { translations } from '../i18n/translations';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { getCountryByCode, getBrowserCountry } from '../data/countries';
-import { validatePhoneNumber } from '../lib/phoneValidation';
+import { validatePhoneNumber, validateEmail, validateGSTIN } from '../lib/phoneValidation';
 import { uploadShopAsset } from '../lib/imageUtils';
 import {
   Store,
   User,
   Phone,
+  Mail,
   MapPin,
   Building,
   Upload,
@@ -17,7 +18,9 @@ import {
   Loader2,
   Camera,
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  FileCheck2,
+  FileText
 } from 'lucide-react';
 
 interface Props {
@@ -31,6 +34,7 @@ interface Props {
 export const ShopSetup: React.FC<Props> = ({
   language,
   initialShop,
+  userEmail,
   userName,
   onComplete,
 }) => {
@@ -39,19 +43,25 @@ export const ShopSetup: React.FC<Props> = ({
   // Profile Form State
   const [shopName, setShopName] = useState(initialShop?.shop_name || '');
   const [ownerName, setOwnerName] = useState(initialShop?.owner_name || userName || '');
-  const [phone, setPhone] = useState(initialShop?.phone || '');
+  const [phone, setPhone] = useState(initialShop?.phone || initialShop?.whatsapp_number || '');
   const [selectedCountry, setSelectedCountry] = useState<CountryConfig>(() =>
     getCountryByCode(initialShop?.country || getBrowserCountry().code)
   );
+  const [email, setEmail] = useState(initialShop?.email || userEmail || '');
+  const [gstNumber, setGstNumber] = useState(initialShop?.gst_number || '');
   const [fullAddress, setFullAddress] = useState(initialShop?.full_address || '');
   const [stateDist, setStateDist] = useState(initialShop?.state || '');
   const [businessType, setBusinessType] = useState(initialShop?.business_type || '');
   const [logoUrl, setLogoUrl] = useState(initialShop?.logo_url || '');
+  const [signatureUrl, setSignatureUrl] = useState(initialShop?.signature_url || '');
 
   // Validation & Loading States
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingSignature, setUploadingSignature] = useState(false);
   const [gateErrorMsg, setGateErrorMsg] = useState<string | null>(null);
   const [phoneErrorMsg, setPhoneErrorMsg] = useState<string | null>(null);
+  const [emailErrorMsg, setEmailErrorMsg] = useState<string | null>(null);
+  const [gstErrorMsg, setGstErrorMsg] = useState<string | null>(null);
 
   // Logo Upload Handler
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -69,10 +79,28 @@ export const ShopSetup: React.FC<Props> = ({
     }
   };
 
+  // Signature Upload Handler
+  const handleSignatureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingSignature(true);
+    try {
+      const url = await uploadShopAsset(file, 'signature', initialShop?.id || 'new');
+      setSignatureUrl(url);
+    } catch (err: any) {
+      console.warn('Signature upload failed (continuing without signature):', err);
+    } finally {
+      setUploadingSignature(false);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setGateErrorMsg(null);
     setPhoneErrorMsg(null);
+    setEmailErrorMsg(null);
+    setGstErrorMsg(null);
 
     // 1. Completion Gate Check: Required Fields
     const trimmedShopName = shopName.trim();
@@ -89,7 +117,7 @@ export const ShopSetup: React.FC<Props> = ({
       return;
     }
 
-    // 2. Country-Aware Mobile Validation
+    // 2. Country-Aware WhatsApp / Phone Validation
     const phoneVal = validatePhoneNumber(phone, selectedCountry, language);
     if (!phoneVal.isValid) {
       setGateErrorMsg(
@@ -103,7 +131,25 @@ export const ShopSetup: React.FC<Props> = ({
       return;
     }
 
-    // 3. Complete Profile Onboarding
+    // 3. Optional Email Validation
+    if (email && email.trim()) {
+      const emailVal = validateEmail(email, language);
+      if (!emailVal.isValid) {
+        setEmailErrorMsg(emailVal.errorMsg || 'Invalid email address');
+        return;
+      }
+    }
+
+    // 4. Optional GSTIN Validation
+    if (gstNumber && gstNumber.trim()) {
+      const gstVal = validateGSTIN(gstNumber, language);
+      if (!gstVal.isValid) {
+        setGstErrorMsg(gstVal.errorMsg || 'Invalid GST number');
+        return;
+      }
+    }
+
+    // 5. Complete Profile Onboarding
     onComplete({
       shop_name: trimmedShopName,
       owner_name: trimmedOwnerName,
@@ -111,12 +157,15 @@ export const ShopSetup: React.FC<Props> = ({
       whatsapp_number: phoneVal.normalizedE164 || phone,
       country: selectedCountry.code,
       currency_code: selectedCountry.currencyCode,
+      email: email.trim(),
+      gst_number: gstNumber.trim().toUpperCase(),
+      gst_enabled: Boolean(gstNumber.trim()),
       full_address: fullAddress.trim(),
       state: stateDist.trim(),
       business_type: businessType.trim(),
       logo_url: logoUrl,
+      signature_url: signatureUrl,
       preferred_language: language,
-      gst_enabled: false,
     });
   };
 
@@ -222,11 +271,11 @@ export const ShopSetup: React.FC<Props> = ({
               />
             </div>
 
-            {/* Country & Country-Aware Mobile Number (Required) */}
+            {/* Country & WhatsApp Number (Required) */}
             <div className="space-y-1">
               <label className="font-extrabold text-slate-700 dark:text-slate-300 flex items-center text-xs">
-                <Phone className="w-3.5 h-3.5 mr-1 text-blue-600" />
-                {language === 'bn' ? 'দেশ ও মোবাইল নম্বর' : 'Country & Mobile Number'} <span className="text-rose-500 font-bold ml-1">*</span>
+                <Phone className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                {language === 'bn' ? 'দেশ ও হোয়াটসঅ্যাপ নম্বর' : language === 'hi' ? 'देश और व्हाट्सएप नंबर' : 'Country & WhatsApp Number'} <span className="text-rose-500 font-bold ml-1">*</span>
               </label>
               <CountryPhoneInput
                 language={language}
@@ -240,6 +289,52 @@ export const ShopSetup: React.FC<Props> = ({
               {phoneErrorMsg && (
                 <p className="text-[11px] font-extrabold text-rose-600 dark:text-rose-400 pt-0.5">
                   ⚠️ {phoneErrorMsg}
+                </p>
+              )}
+            </div>
+
+            {/* Optional Gmail / Email */}
+            <div className="space-y-1">
+              <label className="font-extrabold text-slate-700 dark:text-slate-300 flex items-center text-xs">
+                <Mail className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                {language === 'bn' ? 'ইমেইল এড্রেস (ঐচ্ছিক)' : language === 'hi' ? 'ईमेल पता (वैकल्पिक)' : 'Gmail / Email (Optional)'}
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setEmailErrorMsg(null);
+                }}
+                placeholder="shop@gmail.com"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white rounded-2xl border-2 border-slate-200 dark:border-slate-700 focus:border-blue-600 font-bold outline-none text-xs min-h-[44px]"
+              />
+              {emailErrorMsg && (
+                <p className="text-[11px] font-extrabold text-rose-600 dark:text-rose-400 pt-0.5">
+                  ⚠️ {emailErrorMsg}
+                </p>
+              )}
+            </div>
+
+            {/* Optional GST Number */}
+            <div className="space-y-1">
+              <label className="font-extrabold text-slate-700 dark:text-slate-300 flex items-center text-xs">
+                <FileText className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                {language === 'bn' ? 'GST নম্বর (ঐচ্ছিক)' : language === 'hi' ? 'GST नंबर (वैकल्पिक)' : 'GST Number (Optional)'}
+              </label>
+              <input
+                type="text"
+                value={gstNumber}
+                onChange={(e) => {
+                  setGstNumber(e.target.value);
+                  setGstErrorMsg(null);
+                }}
+                placeholder="e.g. 22AAAAA0000A1Z5"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white rounded-2xl border-2 border-slate-200 dark:border-slate-700 focus:border-blue-600 font-mono font-bold outline-none text-xs min-h-[44px] uppercase"
+              />
+              {gstErrorMsg && (
+                <p className="text-[11px] font-extrabold text-rose-600 dark:text-rose-400 pt-0.5">
+                  ⚠️ {gstErrorMsg}
                 </p>
               )}
             </div>
@@ -287,6 +382,36 @@ export const ShopSetup: React.FC<Props> = ({
                   placeholder="Market name, Street address"
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white rounded-2xl border-2 border-slate-200 dark:border-slate-700 focus:border-blue-600 font-bold outline-none text-xs min-h-[44px]"
                 />
+              </div>
+            </div>
+
+            {/* Optional Signature Upload Card */}
+            <div className="space-y-1 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <label className="font-extrabold text-slate-700 dark:text-slate-300 flex items-center text-xs">
+                <FileCheck2 className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                {language === 'bn' ? 'অনুমোদিত স্বাক্ষর (ঐচ্ছিক)' : 'Authorized Signature Image (Optional)'}
+              </label>
+              <div className="flex items-center space-x-3">
+                <div className="w-24 h-12 bg-slate-100 dark:bg-slate-800 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl flex items-center justify-center overflow-hidden">
+                  {signatureUrl ? (
+                    <img src={signatureUrl} alt="Signature" className="w-full h-full object-contain p-1" />
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-bold">No Signature</span>
+                  )}
+                  {uploadingSignature && <Loader2 className="w-4 h-4 text-blue-600 animate-spin absolute" />}
+                </div>
+
+                <label className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-extrabold text-xs rounded-xl border border-slate-300 dark:border-slate-700 cursor-pointer flex items-center space-x-1.5 min-h-[44px]">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{language === 'bn' ? 'স্বাক্ষর দিন' : 'Upload Signature'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleSignatureUpload}
+                    className="hidden"
+                    disabled={uploadingSignature}
+                  />
+                </label>
               </div>
             </div>
 

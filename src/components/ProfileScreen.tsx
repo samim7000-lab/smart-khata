@@ -4,7 +4,7 @@ import { translations } from '../i18n/translations';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { COUNTRIES, getCountryByCode } from '../data/countries';
 import { uploadShopAsset } from '../lib/imageUtils';
-import { validatePhoneNumber } from '../lib/phoneValidation';
+import { validatePhoneNumber, validateEmail, validateGSTIN } from '../lib/phoneValidation';
 import {
   ArrowLeft,
   Store,
@@ -132,6 +132,22 @@ export const ProfileScreen: React.FC<Props> = ({
     if (!phoneVal.isValid) {
       setErrorMsg(phoneVal.errorMsg || 'Invalid mobile number.');
       return;
+    }
+
+    if (email && email.trim()) {
+      const emailVal = validateEmail(email, language);
+      if (!emailVal.isValid) {
+        setErrorMsg(emailVal.errorMsg || 'Invalid email format.');
+        return;
+      }
+    }
+
+    if (gstNumber && gstNumber.trim()) {
+      const gstVal = validateGSTIN(gstNumber, language);
+      if (!gstVal.isValid) {
+        setErrorMsg(gstVal.errorMsg || 'Invalid GST number format.');
+        return;
+      }
     }
 
     setSaving(true);
