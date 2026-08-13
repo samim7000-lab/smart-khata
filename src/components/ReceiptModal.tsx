@@ -18,6 +18,8 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
+import { validatePhoneNumber } from '../lib/phoneValidation';
+import { getCountryByCode } from '../data/countries';
 import { printTransactionReceiptPDF } from '../lib/pdfGenerator';
 import { getWhatsAppUrl } from '../lib/whatsappUtils';
 import { formatShopCurrency } from '../lib/countryPricing';
@@ -84,9 +86,12 @@ ${t.receipt_thank_you} - ${shop.owner_name}`;
 
   // Customer ID Linkage & Phone Number Validation
   const isIdMismatch = Boolean(transaction.customer_id && transaction.customer_id !== customer.id);
-  const cleanCustomerPhone = (customer.phone_number || '').replace(/\D/g, '');
-  const hasValidPhone = cleanCustomerPhone.length >= 8;
-  const isPhoneMissing = !customer.phone_number || customer.phone_number.trim() === '';
+  const rawCustomerPhone = (customer.phone_number || '').trim();
+  const isPhoneMissing = !rawCustomerPhone;
+
+  const countryConfig = getCountryByCode(shop.country || 'IN');
+  const phoneVal = rawCustomerPhone ? validatePhoneNumber(rawCustomerPhone, countryConfig, language) : { isValid: true };
+  const hasValidPhone = phoneVal.isValid;
 
   const waUrl = getWhatsAppUrl(customer.phone_number, receiptText, shop.country || 'IN');
 
@@ -138,7 +143,7 @@ ${t.receipt_thank_you} - ${shop.owner_name}`;
       return;
     }
     if (!hasValidPhone) {
-      setToastMsg(`⚠️ Customer phone number is invalid (${customer.phone_number}).`);
+      setToastMsg(`⚠️ ${phoneVal.errorMsg || (language === 'bn' ? 'সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.')}`);
       return;
     }
 

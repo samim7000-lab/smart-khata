@@ -4,6 +4,8 @@ import { translations } from '../i18n/translations';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { calculateGst, ALLOWED_GST_RATES, GstCalculationResult } from '../lib/gstUtils';
 import { formatShopCurrency, resolveCurrencySymbol } from '../lib/countryPricing';
+import { validatePhoneNumber } from '../lib/phoneValidation';
+import { getCountryByCode } from '../data/countries';
 import { EMIForm } from './EMIForm';
 import {
   X,
@@ -99,7 +101,17 @@ export const AddTransactionModal: React.FC<Props> = ({
 
   const handleCreateNewCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newPhone.trim()) return;
+    if (!newName.trim()) return;
+
+    // Optional phone validation rule: if phone is not empty, validate strictly
+    if (newPhone.trim()) {
+      const countryConfig = getCountryByCode(shop.country || 'IN');
+      const phoneVal = validatePhoneNumber(newPhone.trim(), countryConfig, language);
+      if (!phoneVal.isValid) {
+        alert(phoneVal.errorMsg || (language === 'bn' ? 'সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.'));
+        return;
+      }
+    }
 
     let displayLabel = newName.trim();
     const isNameDuplicate = customers.some(
@@ -161,6 +173,17 @@ export const AddTransactionModal: React.FC<Props> = ({
 
   const handleSaveTransaction = () => {
     if (!selectedCustomer || enteredVal <= 0 || isSubmitting) return;
+
+    // Optional phone validation rule: if customer phone is present, validate strictly before saving
+    if (selectedCustomer.phone_number && selectedCustomer.phone_number.trim()) {
+      const countryConfig = getCountryByCode(shop.country || 'IN');
+      const phoneVal = validatePhoneNumber(selectedCustomer.phone_number.trim(), countryConfig, language);
+      if (!phoneVal.isValid) {
+        alert(phoneVal.errorMsg || (language === 'bn' ? 'সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.'));
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     let newCustPayload;

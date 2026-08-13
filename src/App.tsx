@@ -627,21 +627,35 @@ export const App: React.FC = () => {
           if (newShopData.logo_url) fullPayload.logo_url = newShopData.logo_url;
           if (newShopData.signature_url) fullPayload.signature_url = newShopData.signature_url;
 
+          // Duplicate shop protection: check if user already has a shop row in DB
+          let targetShopId = shop?.id;
+          if (!targetShopId || !isValidUuid(targetShopId)) {
+            const { data: existingRows } = await supabase
+              .from('shops')
+              .select('id')
+              .eq('owner_id', user.id)
+              .order('created_at', { ascending: true });
+
+            if (existingRows && existingRows.length > 0) {
+              targetShopId = existingRows[0].id;
+            }
+          }
+
           let data: any = null;
           let error: any = null;
 
-          if (shop?.id && isValidUuid(shop.id)) {
+          if (targetShopId && isValidUuid(targetShopId)) {
             // Update existing shop profile
             const updateRes = await supabase
               .from('shops')
               .update(fullPayload)
-              .eq('id', shop.id)
+              .eq('id', targetShopId)
               .select()
               .single();
             data = updateRes.data;
             error = updateRes.error;
           } else {
-            // Insert new shop profile
+            // Insert new shop profile ONLY if no shop exists for owner_id
             const insertRes = await supabase
               .from('shops')
               .insert(fullPayload)
@@ -662,11 +676,11 @@ export const App: React.FC = () => {
               gst_enabled: false,
             };
 
-            if (shop?.id && isValidUuid(shop.id)) {
+            if (targetShopId && isValidUuid(targetShopId)) {
               const baseUpdateRes = await supabase
                 .from('shops')
                 .update(basePayload)
-                .eq('id', shop.id)
+                .eq('id', targetShopId)
                 .select()
                 .single();
               data = baseUpdateRes.data;
@@ -702,11 +716,15 @@ export const App: React.FC = () => {
               owner_id: user.id,
               shop_name: data.shop_name || newShopData.shop_name || 'My Shop',
               owner_name: data.owner_name || newShopData.owner_name || 'Owner',
+              country: data.country || newShopData.country || 'BD',
+              phone: data.phone || newShopData.phone || newShopData.whatsapp_number || '',
+              whatsapp_number: data.whatsapp_number || newShopData.whatsapp_number || newShopData.phone || '',
             };
             setShop(mergedShop);
             saveMockShop(mergedShop);
             localStorage.setItem('smart_khata_onboarding_completed', 'true');
             localStorage.setItem(`smart_khata_cached_shop_${user.id}`, JSON.stringify(mergedShop));
+            localStorage.setItem(`smart_khata_shop_profile_${user.id}`, JSON.stringify(mergedShop));
             setScreen('main');
             loadSupabaseData(mergedShop.id);
             return;

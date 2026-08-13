@@ -144,40 +144,9 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
       });
     }
 
-    // Fallback sample EMI records if database has no accounts yet
-    const products = ['Smartphone 128GB', 'Store Ration List', 'Grocery Items', 'Clothing Package', 'TV / Home Appliance', 'Ceiling Fan'];
-    return customers.map((c, index) => {
-      const balance = c.balance || 0;
-      const totalAmount = Math.max(balance + (index + 1) * 500, 3000);
-      const paidAmount = Math.max(totalAmount - Math.max(balance, 0), 0);
-      const remainingAmount = Math.max(totalAmount - paidAmount, 0);
-      const totalEmiCount = 6;
-      const emiNumber = Math.min(Math.floor((paidAmount / totalAmount) * totalEmiCount) + 1, totalEmiCount);
-      
-      let status: EMIRecord['status'] = 'active';
-      if (remainingAmount <= 0) status = 'completed';
-      else if (index % 3 === 0) status = 'due_today';
-      else if (index % 3 === 1) status = 'overdue';
-      else status = 'upcoming';
-
-      const today = new Date();
-      const dueDate = new Date(today.getTime() + (index % 3 === 1 ? -3 : index % 3 === 0 ? 0 : 5) * 86400000);
-      const dateStr = dueDate.toISOString().split('T')[0];
-
-      return {
-        id: `sample-emi-${c.id}`,
-        productName: products[index % products.length],
-        customer: c,
-        totalAmount,
-        paidAmount,
-        remainingAmount,
-        emiNumber,
-        totalEmiCount,
-        nextDueDate: dateStr,
-        status,
-      };
-    });
-  }, [realEmiAccounts, customers]);
+    // Return empty list if no real EMI accounts exist (Strict Separation between Regular Due and EMI)
+    return [];
+  }, [realEmiAccounts]);
 
   // Deterministically sort EMI list: OVERDUE first -> DUE TODAY second -> UPCOMING third -> COMPLETED last
   const filteredEmiList = useMemo(() => {
@@ -201,11 +170,12 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
     });
   }, [emiRecords, emiFilter]);
 
-  // Filtered Regular List & Priority Counts
-  const filteredList = useMemo(() => {
-    if (selectedTierFilter === 'all') return recoveryData.recommendations;
-    return recoveryData.recommendations.filter((r) => r.priorityTier === selectedTierFilter);
-  }, [recoveryData.recommendations, selectedTierFilter]);
+  // Slice Regular Recovery priorities based on entitlement limits
+  const allowedPriorities = recoveryData.recommendations.slice(0, entitlements.weeklyAiQuota || 3);
+  const filteredList = allowedPriorities.filter((item) => {
+    if (selectedTierFilter === 'all') return true;
+    return item.priorityTier === selectedTierFilter;
+  });
 
   const highCount = recoveryData.recommendations.filter((r) => r.priorityTier === 'high').length;
   const mediumCount = recoveryData.recommendations.filter((r) => r.priorityTier === 'medium').length;
@@ -234,9 +204,9 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col max-w-4xl mx-auto p-4 pb-24 space-y-5 transition-colors">
-      {/* Top Banner */}
-      <div className="bg-gradient-to-r from-purple-700 via-indigo-700 to-blue-700 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10">
+      {/* Header Banner */}
+      <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white p-6 rounded-3xl shadow-xl relative overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
           <div className="space-y-1">
             <div className="flex items-center space-x-2">
               <div className="p-2 bg-white/20 rounded-2xl backdrop-blur-md">
@@ -275,7 +245,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
           }`}
         >
           <Brain className="w-4 h-4 text-yellow-300" />
-          <span>🧠 {language === 'bn' ? 'সাধারণ বাকি আদায়' : language === 'hi' ? 'साधारण वसूली' : 'Regular Recovery'}</span>
+          <span>🧠 {language === 'bn' ? 'সাধারণ বাকি' : language === 'hi' ? 'साधारण बकाया' : 'Regular Due'}</span>
         </button>
         <button
           onClick={() => setActiveTab('emi')}
@@ -286,7 +256,7 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
           }`}
         >
           <CreditCard className="w-4 h-4 text-emerald-300" />
-          <span>💳 {language === 'bn' ? 'কিস্তি আদায় (EMI)' : language === 'hi' ? 'किश्त वसूली (EMI)' : 'EMI Recovery'}</span>
+          <span>💳 {language === 'bn' ? 'কিস্তি' : language === 'hi' ? 'किश्त (EMI)' : 'EMI'}</span>
         </button>
       </div>
 
