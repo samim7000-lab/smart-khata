@@ -611,51 +611,13 @@ export const App: React.FC = () => {
             error = insertRes.error;
           }
 
-          // Schema cache fallback for remote database before migration execution
-          if (error && (error.message?.includes('schema cache') || error.message?.includes('column') || error.code === 'PGRST204')) {
-            console.warn('[REAL AUTH DEBUG] Extended columns not present in PostgREST schema cache. Retrying with base payload fallback...');
-            const resolvedPhone = newShopData.whatsapp_number || newShopData.phone || '';
-            const resolvedCountry = newShopData.country || 'BD';
-
-            const basePayload = {
-              owner_id: user.id,
-              shop_name: newShopData.shop_name || 'My Shop',
-              owner_name: newShopData.owner_name || 'Owner',
-              country: resolvedCountry,
-              phone: resolvedPhone,
-              whatsapp_number: resolvedPhone,
-              preferred_language: language,
-              gst_enabled: false,
-            };
-
-            if (targetShopId && isValidUuid(targetShopId)) {
-              const baseUpdateRes = await supabase
-                .from('shops')
-                .update(basePayload)
-                .eq('id', targetShopId)
-                .select()
-                .single();
-              data = baseUpdateRes.data;
-              error = baseUpdateRes.error;
-            } else {
-              const baseInsertRes = await supabase
-                .from('shops')
-                .insert(basePayload)
-                .select()
-                .single();
-              data = baseInsertRes.data;
-              error = baseInsertRes.error;
-            }
-
-            // Merge local extended fields into saved data if base fallback was used
-            if (data) {
-              data = { ...data, ...newShopData };
-            }
-          }
-
           if (error) {
-            console.error('[ONBOARDING] Error saving shop profile in database:', error.message);
-            alert('Could not save shop profile in database: ' + error.message);
+            console.error('[ONBOARDING] Database save error:', error.message);
+            const userMsg = language === 'bn'
+              ? 'প্রোফাইল সংরক্ষণ করা যায়নি। Database setup সম্পূর্ণ করুন এবং আবার চেষ্টা করুন।'
+              : 'Could not save shop profile. Please complete database setup and try again.';
+            const detailMsg = import.meta.env.DEV ? ` (${error.message})` : '';
+            alert(userMsg + detailMsg);
             return;
           }
 

@@ -66,6 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_emi_installments_account_num ON public.emi_instal
 ALTER TABLE public.emi_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.emi_installments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "EMI accounts shop owner access" ON public.emi_accounts;
 CREATE POLICY "EMI accounts shop owner access"
 ON public.emi_accounts
 FOR ALL
@@ -81,6 +82,7 @@ WITH CHECK (
     )
 );
 
+DROP POLICY IF EXISTS "EMI installments shop owner access" ON public.emi_installments;
 CREATE POLICY "EMI installments shop owner access"
 ON public.emi_installments
 FOR ALL

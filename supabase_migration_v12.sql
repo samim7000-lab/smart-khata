@@ -1,5 +1,7 @@
--- Smart Khata Supabase Migration: Expand Shop Profile Schema
--- Non-destructive addition of profile fields to public.shops
+-- ====================================================
+-- SMART KHATA MIGRATION V12: EXPAND SHOP PROFILE SCHEMA
+-- Add all 15 profile columns to public.shops and reload PostgREST schema cache
+-- ====================================================
 
 ALTER TABLE public.shops 
     ADD COLUMN IF NOT EXISTS phone TEXT,
