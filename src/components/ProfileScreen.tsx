@@ -4,6 +4,7 @@ import { translations } from '../i18n/translations';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { COUNTRIES, getCountryByCode } from '../data/countries';
 import { uploadShopAsset } from '../lib/imageUtils';
+import { validatePhoneNumber } from '../lib/phoneValidation';
 import {
   ArrowLeft,
   Store,
@@ -123,7 +124,13 @@ export const ProfileScreen: React.FC<Props> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!shopName.trim() || !ownerName.trim()) {
-      setErrorMsg('Shop name and owner name are required.');
+      setErrorMsg(language === 'bn' ? 'দোকানের নাম এবং মালিকের নাম দেওয়া আবশ্যক।' : 'Shop name and owner name are required.');
+      return;
+    }
+
+    const phoneVal = validatePhoneNumber(phone, selectedCountry, language);
+    if (!phoneVal.isValid) {
+      setErrorMsg(phoneVal.errorMsg || 'Invalid mobile number.');
       return;
     }
 

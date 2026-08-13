@@ -4,6 +4,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { LanguageSelector } from './components/LanguageSelector';
 import { PhoneAuth } from './components/PhoneAuth';
 import { ShopSetup } from './components/ShopSetup';
+import { isShopProfileComplete } from './lib/profileUtils';
 import { Navbar } from './components/Navbar';
 import { Navigation, NavTab } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
@@ -426,32 +427,38 @@ export const App: React.FC = () => {
           setShop(sanitizedShop);
           saveMockShop(sanitizedShop);
           localStorage.setItem(`smart_khata_cached_shop_${userId}`, JSON.stringify(sanitizedShop));
-          localStorage.setItem('smart_khata_onboarding_completed', 'true');
 
           // Priority: 1. Explicit user choice in localStorage -> 2. Saved shop language -> 3. Fallback 'bn'
           const effectiveLang = savedLang || (primaryShopRecord.preferred_language as Language) || 'bn';
           setLanguage(effectiveLang);
           localStorage.setItem('smart_khata_lang', effectiveLang);
 
-          setScreen('main');
-          loadSupabaseData(primaryShopRecord.id);
+          if (isShopProfileComplete(sanitizedShop)) {
+            localStorage.setItem('smart_khata_onboarding_completed', 'true');
+            setScreen('main');
+            loadSupabaseData(primaryShopRecord.id);
+          } else {
+            console.log('[ONBOARDING DEBUG] User shop exists but required profile fields are incomplete. Directing to Full Profile Onboarding.');
+            setScreen('shop_setup');
+          }
         } else {
           // Check per-user persistent local cache before forcing Shop Setup
           const userCachedShopRaw = localStorage.getItem(`smart_khata_cached_shop_${userId}`);
           if (userCachedShopRaw) {
             try {
               const cachedShop = JSON.parse(userCachedShopRaw);
-              console.log('[AUTH DEBUG] Found user shop in persistent local cache:', cachedShop.id);
               setShop(cachedShop);
-              setScreen('main');
-              loadSupabaseData(cachedShop.id);
-              return;
+              if (isShopProfileComplete(cachedShop)) {
+                setScreen('main');
+                loadSupabaseData(cachedShop.id);
+                return;
+              }
             } catch {
               // Ignore cache parse error
             }
           }
 
-          console.log('[AUTH DEBUG] Definitively no existing shop found for user. Directing to Shop Setup.');
+          console.log('[AUTH DEBUG] No complete shop found for user. Directing to Full Profile Onboarding.');
           setShop(null);
           if (savedLang) {
             setLanguage(savedLang);
@@ -465,8 +472,10 @@ export const App: React.FC = () => {
           try {
             const cachedShop = JSON.parse(userCachedShopRaw);
             setShop(cachedShop);
-            setScreen('main');
-            return;
+            if (isShopProfileComplete(cachedShop)) {
+              setScreen('main');
+              return;
+            }
           } catch {
             // Ignore
           }
@@ -475,7 +484,7 @@ export const App: React.FC = () => {
       }
     } else {
       const localShop = getStoredMockShop();
-      if (localShop) {
+      if (localShop && isShopProfileComplete(localShop)) {
         setShop(localShop);
         if (savedLang) {
           setLanguage(savedLang);
@@ -597,7 +606,7 @@ export const App: React.FC = () => {
         const user = authUser?.user;
 
         if (user) {
-          console.log(`[REAL AUTH DEBUG] Creating new shop in Supabase DB for user: ${user.id}`);
+          console.log(`[ONBOARDING DEBUG] Saving completed shop profile in Supabase DB for user: ${user.id}`);
           const fullPayload: any = {
             owner_id: user.id,
             shop_name: newShopData.shop_name || 'My Shop',
@@ -611,44 +620,45 @@ export const App: React.FC = () => {
           if (newShopData.country) fullPayload.country = newShopData.country;
           if (newShopData.currency_code) fullPayload.currency_code = newShopData.currency_code;
           if (newShopData.business_type) fullPayload.business_type = newShopData.business_type;
+          if (newShopData.full_address) fullPayload.full_address = newShopData.full_address;
+          if (newShopData.state) fullPayload.state = newShopData.state;
+          if (newShopData.logo_url) fullPayload.logo_url = newShopData.logo_url;
 
-          let { data, error } = await supabase
-            .from('shops')
-            .insert(fullPayload)
-            .select()
-            .single();
+          let data: any = null;
+          let error: any = null;
 
-          // Fallback to base schema payload if schema cache does not have extended columns yet
-          if (error && (error.message?.includes('schema cache') || error.code === 'PGRST204')) {
-            console.warn('[REAL AUTH DEBUG] Extended columns not in schema cache. Falling back to base payload...');
-            const basePayload = {
-              owner_id: user.id,
-              shop_name: newShopData.shop_name || 'My Shop',
-              owner_name: newShopData.owner_name || 'Owner',
-              preferred_language: language,
-              gst_enabled: false,
-            };
-
-            const baseResult = await supabase
+          if (shop?.id && isValidUuid(shop.id)) {
+            // Update existing shop profile
+            const updateRes = await supabase
               .from('shops')
-              .insert(basePayload)
+              .update(fullPayload)
+              .eq('id', shop.id)
               .select()
               .single();
-
-            data = baseResult.data;
-            error = baseResult.error;
+            data = updateRes.data;
+            error = updateRes.error;
+          } else {
+            // Insert new shop profile
+            const insertRes = await supabase
+              .from('shops')
+              .insert(fullPayload)
+              .select()
+              .single();
+            data = insertRes.data;
+            error = insertRes.error;
           }
 
           if (error) {
-            console.error('[REAL AUTH DEBUG] Error creating shop in Supabase:', error.message);
-            alert('Could not create shop in database: ' + error.message);
+            console.error('[REAL AUTH DEBUG] Error saving shop profile in Supabase:', error.message);
+            alert('Could not save shop profile in database: ' + error.message);
             return;
           }
 
           if (data && isValidUuid(data.id)) {
-            console.log('[REAL AUTH DEBUG] Shop created successfully with valid UUID:', data.id);
+            console.log('[REAL AUTH DEBUG] Shop profile saved successfully:', data.id);
             setShop(data);
             localStorage.setItem('smart_khata_onboarding_completed', 'true');
+            localStorage.setItem(`smart_khata_cached_shop_${user.id}`, JSON.stringify(data));
             setScreen('main');
             loadSupabaseData(data.id);
             return;

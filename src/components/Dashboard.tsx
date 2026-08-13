@@ -99,7 +99,7 @@ export const Dashboard: React.FC<Props> = ({
       </div>
 
       {/* Top Financial Overview Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+      <div className="grid grid-cols-2 gap-3.5">
         {/* Total Udhar Card (Soft Coral / Alert) */}
         <div className="bg-rose-50/90 dark:bg-rose-950/40 border-2 border-rose-200/80 dark:border-rose-900/60 rounded-3xl p-4.5 shadow-sm text-rose-950 dark:text-rose-100 flex flex-col justify-between backdrop-blur-md">
           <div className="flex items-center justify-between">
@@ -135,26 +135,6 @@ export const Dashboard: React.FC<Props> = ({
               {formatShopCurrency(totalCollected, shop?.country, shop?.currency_code)}
             </div>
             <div className="text-[11px] font-bold text-emerald-600/90 dark:text-emerald-400">{t.paid_up}</div>
-          </div>
-        </div>
-
-        {/* Recovery Rate Card (Trust Indigo / Security) */}
-        <div className="col-span-2 sm:col-span-1 bg-indigo-50/90 dark:bg-indigo-950/40 border-2 border-indigo-200/80 dark:border-indigo-900/60 rounded-3xl p-4.5 shadow-sm text-indigo-950 dark:text-indigo-100 flex flex-col justify-between backdrop-blur-md">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] uppercase font-extrabold text-indigo-700 dark:text-indigo-300 tracking-wider">
-              {t.recovery_rate}
-            </span>
-            <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/60 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-300 shadow-xs">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3.5 space-y-0.5">
-            <div className="text-2xl sm:text-3xl font-black tracking-tight text-indigo-700 dark:text-indigo-300 tabular-nums">
-              {recoveryRate}%
-            </div>
-            <div className="text-[11px] font-bold text-indigo-600/90 dark:text-indigo-400">
-              {totalCreditGiven > 0 ? `${formatShopCurrency(totalCreditGiven, shop?.country, shop?.currency_code)} ${t.credit_given}` : 'No dues pending'}
-            </div>
           </div>
         </div>
       </div>
