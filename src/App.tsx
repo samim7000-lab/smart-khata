@@ -50,6 +50,7 @@ export const App: React.FC = () => {
 
   // Auth Session Initialization State (Prevents race conditions on Google OAuth redirect)
   const [isAuthInitializing, setIsAuthInitializing] = useState<boolean>(true);
+  const [lastShopError, setLastShopError] = useState<string | null>(null);
 
   // Onboarding & App State (Single source of truth for language: localStorage -> 'bn')
   const [language, setLanguage] = useState<Language>(() => {
@@ -378,6 +379,9 @@ export const App: React.FC = () => {
 
         if (error) {
           console.error('[SHOP] Error querying public.shops:', error.message);
+          setLastShopError(error.message);
+        } else {
+          setLastShopError(null);
         }
 
         if (shopRows && shopRows.length > 0) {
@@ -610,10 +614,16 @@ export const App: React.FC = () => {
           // Schema cache fallback for remote database before migration execution
           if (error && (error.message?.includes('schema cache') || error.message?.includes('column') || error.code === 'PGRST204')) {
             console.warn('[REAL AUTH DEBUG] Extended columns not present in PostgREST schema cache. Retrying with base payload fallback...');
+            const resolvedPhone = newShopData.whatsapp_number || newShopData.phone || '';
+            const resolvedCountry = newShopData.country || 'BD';
+
             const basePayload = {
               owner_id: user.id,
               shop_name: newShopData.shop_name || 'My Shop',
               owner_name: newShopData.owner_name || 'Owner',
+              country: resolvedCountry,
+              phone: resolvedPhone,
+              whatsapp_number: resolvedPhone,
               preferred_language: language,
               gst_enabled: false,
             };
@@ -1354,6 +1364,25 @@ export const App: React.FC = () => {
           onClose={() => setLockedFeatureName(null)}
           onOpenSubscriptions={() => setIsSubscriptionOpen(true)}
         />
+      )}
+
+      {/* Temporary DEV-ONLY Debug Panel (STEP 8) */}
+      {import.meta.env.DEV && (
+        <div className="fixed bottom-2 right-2 z-50 bg-slate-900/90 text-white p-3 rounded-xl border border-slate-700 shadow-2xl text-[11px] font-mono space-y-1 max-w-xs pointer-events-auto">
+          <div className="font-extrabold text-yellow-400 border-b border-slate-700 pb-1 flex justify-between items-center">
+            <span>🛠️ DEV AUTH DEBUG PANEL</span>
+            <span className="text-[9px] bg-yellow-400/20 text-yellow-300 px-1.5 py-0.5 rounded">DEV</span>
+          </div>
+          <div><span className="text-slate-400">User ID:</span> <span className="text-emerald-300 font-bold">{activeUserId || 'null'}</span></div>
+          <div><span className="text-slate-400">Email:</span> <span className="text-emerald-300">{authUserMeta.email || 'null'}</span></div>
+          <div><span className="text-slate-400">Shop ID:</span> <span className="text-blue-300">{shop?.id || 'null'}</span></div>
+          <div><span className="text-slate-400">Owner ID:</span> <span className="text-blue-300">{shop?.owner_id || 'null'}</span></div>
+          <div><span className="text-slate-400">Shop Found:</span> <span className={shop ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{shop ? 'YES' : 'NO'}</span></div>
+          <div><span className="text-slate-400">Profile Complete:</span> <span className={isShopProfileComplete(shop) ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{isShopProfileComplete(shop) ? 'YES' : 'NO'}</span></div>
+          <div><span className="text-slate-400">Screen:</span> <span className="text-cyan-300 font-bold">{screen}</span></div>
+          <div><span className="text-slate-400">Auth Loading:</span> {isAuthInitializing ? 'YES' : 'NO'}</div>
+          {lastShopError && <div className="text-rose-400 text-[10px] truncate"><span className="text-slate-400">Error:</span> {lastShopError}</div>}
+        </div>
       )}
     </div>
   );
