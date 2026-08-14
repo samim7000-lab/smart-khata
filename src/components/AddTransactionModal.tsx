@@ -6,7 +6,7 @@ import { calculateGst, ALLOWED_GST_RATES, GstCalculationResult } from '../lib/gs
 import { formatShopCurrency, resolveCurrencySymbol } from '../lib/countryPricing';
 import { validatePhoneNumber } from '../lib/phoneValidation';
 import { getCountryByCode } from '../data/countries';
-import { EMIForm } from './EMIForm';
+import { EMIForm, EMIPayloadData } from './EMIForm';
 import {
   X,
   Search,
@@ -35,7 +35,9 @@ interface Props {
     amount: number,
     note: string,
     newCustomerData?: { name: string; phone: string; displayLabel: string; state?: string },
-    gstDetails?: GstCalculationResult
+    gstDetails?: GstCalculationResult,
+    ledgerPhotoUrl?: string,
+    emiDetails?: EMIPayloadData
   ) => void;
 }
 
@@ -435,8 +437,26 @@ export const AddTransactionModal: React.FC<Props> = ({
                     language={language}
                     initialAmount={enteredVal}
                     initialNote={note}
-                    onSuccess={(accountId) => {
-                      onClose();
+                    onSaveEMI={(emiData) => {
+                      let newCustPayload;
+                      if (selectedCustomer?.id.startsWith('temp-')) {
+                        newCustPayload = {
+                          name: selectedCustomer.name,
+                          phone: selectedCustomer.phone_number,
+                          displayLabel: selectedCustomer.display_label,
+                          state: selectedCustomer.state,
+                        };
+                      }
+                      onSave(
+                        selectedCustomer ? selectedCustomer.id : (emiData.customer_id || ''),
+                        'credit_given',
+                        emiData.financed_amount,
+                        `EMI: ${emiData.product_name}`,
+                        newCustPayload,
+                        undefined,
+                        undefined,
+                        emiData
+                      );
                     }}
                     onCancel={() => setIsEMIMode(false)}
                   />

@@ -5,6 +5,18 @@ import { EMIService, CreateEMIPayload } from '../lib/emiService';
 import { formatShopCurrency } from '../lib/countryPricing';
 import { CreditCard, Calendar, ShoppingBag, Calculator, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
+export interface EMIPayloadData {
+  product_name: string;
+  total_amount: number;
+  down_payment: number;
+  financed_amount: number;
+  installment_count: number;
+  installment_amount: number;
+  start_date: string;
+  notes?: string;
+  customer_id?: string;
+}
+
 interface Props {
   shop: Shop;
   customers: Customer[];
@@ -12,7 +24,7 @@ interface Props {
   language: Language;
   initialAmount?: number;
   initialNote?: string;
-  onSuccess: (accountId: string) => void;
+  onSaveEMI: (emiData: EMIPayloadData) => void;
   onCancel: () => void;
 }
 
@@ -23,7 +35,7 @@ export const EMIForm: React.FC<Props> = ({
   language,
   initialAmount = 0,
   initialNote = '',
-  onSuccess,
+  onSaveEMI,
   onCancel,
 }) => {
   const [customerId, setCustomerId] = useState<string>(selectedCustomer?.id || (customers[0]?.id || ''));
@@ -42,7 +54,6 @@ export const EMIForm: React.FC<Props> = ({
   const [firstDueDate, setFirstDueDate] = useState<string>(defaultFirstDueDate);
   const [notes, setNotes] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Math Computations
   const totalAmount = Number(totalAmountStr) || 0;
@@ -52,7 +63,7 @@ export const EMIForm: React.FC<Props> = ({
 
   // Real-time validation
   const validationError = useMemo<string | null>(() => {
-    if (!customerId) {
+    if (!selectedCustomer && !customerId) {
       return language === 'bn' ? 'অনুগৃহ করে একজন কাস্টমার নির্বাচন করুন' : 'Please select a customer';
     }
     if (!productName || productName.trim() === '') {
@@ -71,9 +82,9 @@ export const EMIForm: React.FC<Props> = ({
       return language === 'bn' ? 'কিস্তির সংখ্যা ১ বা তার বেশি দিন' : 'Installment count must be at least 1';
     }
     return null;
-  }, [customerId, productName, totalAmount, downPayment, installmentCount, language]);
+  }, [selectedCustomer, customerId, productName, totalAmount, downPayment, installmentCount, language]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (validationError) {
       setErrorMsg(validationError);
@@ -81,10 +92,7 @@ export const EMIForm: React.FC<Props> = ({
     }
 
     setErrorMsg(null);
-    setIsSubmitting(true);
-
-    const payload: CreateEMIPayload = {
-      shop_id: shop.id,
+    onSaveEMI({
       customer_id: customerId,
       product_name: productName.trim(),
       total_amount: totalAmount,
@@ -94,16 +102,7 @@ export const EMIForm: React.FC<Props> = ({
       installment_amount: monthlyInstallment,
       start_date: firstDueDate,
       notes: notes.trim(),
-    };
-
-    const res = await EMIService.createEMIAccount(payload);
-    setIsSubmitting(false);
-
-    if (res.success && res.accountId) {
-      onSuccess(res.accountId);
-    } else {
-      setErrorMsg(res.error || (language === 'bn' ? 'কিছু সমস্যা হয়েছে। আবার চেষ্টা করুন।' : 'Something went wrong. Please try again.'));
-    }
+    });
   };
 
   return (
@@ -292,7 +291,6 @@ export const EMIForm: React.FC<Props> = ({
           <button
             type="button"
             onClick={onCancel}
-            disabled={isSubmitting}
             className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-extrabold rounded-2xl min-h-[44px]"
           >
             {language === 'bn' ? 'বাতিল' : 'Cancel'}
@@ -300,17 +298,11 @@ export const EMIForm: React.FC<Props> = ({
 
           <button
             type="submit"
-            disabled={isSubmitting || !!validationError}
+            disabled={!!validationError}
             className="flex-1 py-3 bg-purple-600 hover:bg-purple-700 text-white font-black rounded-2xl shadow-lg shadow-purple-600/30 flex items-center justify-center space-x-2 disabled:opacity-50 min-h-[44px]"
           >
-            {isSubmitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                <span>{language === 'bn' ? 'EMI তৈরি করুন' : 'Create EMI Plan'}</span>
-              </>
-            )}
+            <CheckCircle2 className="w-4 h-4" />
+            <span>{language === 'bn' ? 'EMI তৈরি করুন' : 'Create EMI Plan'}</span>
           </button>
         </div>
       </form>

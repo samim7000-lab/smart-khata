@@ -10,6 +10,7 @@ import { getCountryPricing, formatShopCurrency } from '../lib/countryPricing';
 import { WhatsAppDirectLinkProvider } from '../lib/communicationEngine';
 import { EntitlementService } from '../lib/entitlementEngine';
 import { EMIService, EMIAccountDB, EMIInstallmentDB } from '../lib/emiService';
+import { isValidUuid } from '../lib/uuidGuard';
 import { EMIForm } from './EMIForm';
 import { EMIAccountDetail } from './EMIAccountDetail';
 import {
@@ -768,8 +769,25 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
             shop={shop}
             customers={customers}
             language={language}
-            onSuccess={() => {
+            onSaveEMI={async (emiData) => {
               setIsEMIFormOpen(false);
+              const targetCustId = emiData.customer_id || (customers[0]?.id || '');
+              if (!isValidUuid(shop.id) || !isValidUuid(targetCustId)) {
+                alert('Invalid shop or customer account.');
+                return;
+              }
+              await EMIService.createEMIAccount({
+                shop_id: shop.id,
+                customer_id: targetCustId,
+                product_name: emiData.product_name,
+                total_amount: emiData.total_amount,
+                down_payment: emiData.down_payment,
+                financed_amount: emiData.financed_amount,
+                installment_count: emiData.installment_count,
+                installment_amount: emiData.installment_amount,
+                start_date: emiData.start_date,
+                notes: emiData.notes,
+              });
               loadEmiAccounts();
             }}
             onCancel={() => setIsEMIFormOpen(false)}

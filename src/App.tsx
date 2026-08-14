@@ -6,6 +6,9 @@ import { PhoneAuth } from './components/PhoneAuth';
 import { ShopSetup } from './components/ShopSetup';
 import { isShopProfileComplete } from './lib/profileUtils';
 import { classifyTransaction, logTransactionRouting } from './lib/transactionRouting';
+import { assertValidUuid } from './lib/uuidGuard';
+import { EMIPayloadData } from './components/EMIForm';
+import { EMIService } from './lib/emiService';
 import { Navbar } from './components/Navbar';
 import { Navigation, NavTab } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
@@ -745,7 +748,8 @@ export const App: React.FC = () => {
     note: string,
     newCustomerData?: { name: string; phone: string; displayLabel: string; state?: string },
     gstDetails?: any,
-    ledgerPhotoUrl?: string
+    ledgerPhotoUrl?: string,
+    emiDetails?: EMIPayloadData
   ) => {
     if (!shop || isSavingTxRef.current) return;
     isSavingTxRef.current = true;
@@ -756,7 +760,7 @@ export const App: React.FC = () => {
       // Pre-flight validation: Ensure shop.id is a valid PostgreSQL UUID
       if (isSupabaseConfigured && supabase) {
         if (!isValidUuid(activeShop.id)) {
-          console.warn(`[REAL AUTH DEBUG] shop.id "${activeShop.id}" is not a valid UUID. Resolving real shop...`);
+          console.warn(`[UUID-GUARD] shop.id "${activeShop.id}" is not a valid UUID. Resolving real shop...`);
           const { data: authUser } = await supabase.auth.getUser();
           if (authUser?.user) {
             const { data: dbShop } = await supabase
@@ -766,15 +770,13 @@ export const App: React.FC = () => {
               .maybeSingle();
 
             if (dbShop && isValidUuid(dbShop.id)) {
-              console.log(`[REAL AUTH DEBUG] Successfully re-resolved valid shop UUID: ${dbShop.id}`);
+              console.log(`[UUID-GUARD] Successfully re-resolved valid shop UUID: ${dbShop.id}`);
               setShop(dbShop);
               activeShop = dbShop;
             } else {
               alert('Your shop account could not be resolved from database. Please sign in again.');
               return;
             }
-          } else if (activeUserId || localStorage.getItem('smart_khata_dev_user')) {
-            console.log('[DEV AUTH DEBUG] Using local shop ID for transaction in Development OTP mode');
           } else {
             alert('Session expired. Please sign in again.');
             return;
@@ -782,21 +784,27 @@ export const App: React.FC = () => {
         }
       }
 
+      assertValidUuid(activeShop.id, 'activeShop.id');
+
       let finalCustId = customerId;
       let targetCustomer: Customer | undefined;
 
-      // 1. Handle Inline Customer Creation
-      if (newCustomerData) {
+      // 1. Handle Inline Customer Creation (Guarantees DB Real UUID)
+      if (newCustomerData || customerId.startsWith('temp-')) {
         if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
           try {
-            console.log(`[REAL AUTH DEBUG] Inserting Customer into Supabase DB for shop_id: ${activeShop.id}`);
+            console.log(`[UUID-GUARD] Inserting Customer into Supabase DB for shop_id: ${activeShop.id}`);
+            const custName = newCustomerData?.name || (customers.find(c => c.id === customerId)?.name) || 'Customer';
+            const custPhone = newCustomerData?.phone || (customers.find(c => c.id === customerId)?.phone_number) || '';
+            const custLabel = newCustomerData?.displayLabel || custName;
+
             const custPayload: any = {
               shop_id: activeShop.id,
-              name: newCustomerData.name,
-              phone_number: newCustomerData.phone,
-              display_label: newCustomerData.displayLabel,
+              name: custName,
+              phone_number: custPhone,
+              display_label: custLabel,
             };
-            if (newCustomerData.state && newCustomerData.state.trim()) {
+            if (newCustomerData?.state && newCustomerData.state.trim()) {
               custPayload.state = newCustomerData.state.trim();
             }
 
@@ -806,25 +814,23 @@ export const App: React.FC = () => {
               .select()
               .single();
 
-            if (error) throw error;
-            if (data) {
-              console.log(`[REAL AUTH DEBUG] Customer inserted successfully into DB. ID: ${data.id}`);
-              finalCustId = data.id;
-              targetCustomer = data;
-            }
+            if (error || !data) throw error || new Error('Customer insertion failed');
+
+            console.log(`[UUID-GUARD] Customer inserted successfully. DB Real UUID: ${data.id}`);
+            finalCustId = data.id;
+            targetCustomer = data;
           } catch (err: any) {
-            console.error('[REAL AUTH DEBUG] Supabase customer insert error:', err);
-            alert('Failed to add customer to database: ' + err.message);
+            console.error('[UUID-GUARD] Customer insertion failed:', err);
+            alert('Failed to save customer to database: ' + (err.message || err));
             return;
           }
         } else {
           const newCust: Customer = {
             id: `cust-${Date.now()}`,
-            shop_id: shop.id,
-            name: newCustomerData.name,
-            phone_number: newCustomerData.phone,
-            display_label: newCustomerData.displayLabel,
-            state: newCustomerData.state,
+            shop_id: activeShop.id,
+            name: newCustomerData?.name || 'Customer',
+            phone_number: newCustomerData?.phone || '',
+            display_label: newCustomerData?.displayLabel || 'Customer',
             created_at: new Date().toISOString(),
             balance: 0,
           };
@@ -838,9 +844,17 @@ export const App: React.FC = () => {
         targetCustomer = customers.find((c) => c.id === customerId);
       }
 
-      if (!targetCustomer) return;
+      if (!targetCustomer) {
+        alert('Selected customer could not be resolved.');
+        return;
+      }
 
-      // 2. Save Transaction
+      // Pre-flight assertion: finalCustId MUST be a valid UUID before sending to Supabase
+      if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
+        assertValidUuid(finalCustId, 'customer_id');
+      }
+
+      // 2. Save Transaction into public.transactions
       let savedTx: Transaction | null = null;
       const txGstPayload = gstDetails
         ? {
@@ -857,10 +871,10 @@ export const App: React.FC = () => {
 
       if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
         try {
-          console.log(`[REAL AUTH DEBUG] Inserting Transaction into Supabase DB for shop_id: ${activeShop.id}, customer_id: ${finalCustId}`);
+          console.log(`[UUID-GUARD] Inserting Transaction into DB for shop_id: ${activeShop.id}, customer_id: ${finalCustId}`);
           const txPayload: any = {
             shop_id: activeShop.id,
-            customer_id: finalCustId,
+            customer_id: finalCustId, // REAL DB UUID!
             type,
             amount,
             note: note || '',
@@ -877,9 +891,7 @@ export const App: React.FC = () => {
             .select()
             .single();
 
-          // Fallback if PostgREST schema cache does not have ledger_photo_url column yet
           if (error && (error.message?.includes('schema cache') || error.code === 'PGRST204')) {
-            console.warn('[REAL AUTH DEBUG] ledger_photo_url not in schema cache. Retrying transaction insert...');
             delete txPayload.ledger_photo_url;
             const retryResult = await supabase
               .from('transactions')
@@ -891,13 +903,12 @@ export const App: React.FC = () => {
             error = retryResult.error;
           }
 
-          if (error) throw error;
-          if (data) {
-            console.log(`[REAL AUTH DEBUG] Transaction inserted successfully into DB. ID: ${data.id}`);
-            savedTx = data;
-          }
+          if (error || !data) throw error || new Error('Transaction insertion failed');
+
+          console.log(`[UUID-GUARD] Transaction inserted successfully into DB. Real DB UUID: ${data.id}`);
+          savedTx = data;
         } catch (err: any) {
-          console.error('[REAL AUTH DEBUG] Supabase transaction insert error:', err);
+          console.error('[UUID-GUARD] Supabase transaction insert error:', err);
           alert('Failed to save transaction: ' + err.message);
           return;
         }
@@ -920,7 +931,40 @@ export const App: React.FC = () => {
 
       if (!savedTx) return;
 
-      const isEmiTx = note?.startsWith('EMI:') || false;
+      // 3. Atomic EMI Account & Schedule Creation (If EMI mode)
+      if (emiDetails && isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
+        assertValidUuid(savedTx.id, 'savedTx.id');
+        assertValidUuid(finalCustId, 'finalCustId');
+
+        console.log(`[UUID-GUARD] Creating EMI Account with DB Real UUIDs: shop_id=${activeShop.id}, customer_id=${finalCustId}, transaction_id=${savedTx.id}`);
+
+        const emiRes = await EMIService.createEMIAccount({
+          shop_id: activeShop.id,
+          customer_id: finalCustId, // REAL DB UUID!
+          transaction_id: savedTx.id, // REAL DB UUID!
+          product_name: emiDetails.product_name,
+          total_amount: emiDetails.total_amount,
+          down_payment: emiDetails.down_payment,
+          financed_amount: emiDetails.financed_amount,
+          installment_count: emiDetails.installment_count,
+          installment_amount: emiDetails.installment_amount,
+          start_date: emiDetails.start_date,
+          notes: emiDetails.notes,
+        });
+
+        if (!emiRes.success) {
+          console.error('[UUID-GUARD] EMI creation failed. Rolling back transaction:', emiRes.error);
+          // Rollback transaction to maintain strict database atomicity
+          await supabase.from('transactions').delete().eq('id', savedTx.id);
+          alert('Failed to set up EMI account: ' + emiRes.error);
+          return;
+        }
+
+        console.log(`[UUID-GUARD] EMI Account and Installment schedule created successfully! Account ID: ${emiRes.accountId}`);
+      }
+
+      // 4. Diagnostic Logging
+      const isEmiTx = Boolean(emiDetails) || note?.startsWith('EMI:');
       const custBalance = targetCustomer.balance || 0;
       const updatedBalance = type === 'credit_given' ? custBalance + amount : custBalance - amount;
       const classification = classifyTransaction(type, isEmiTx, updatedBalance);

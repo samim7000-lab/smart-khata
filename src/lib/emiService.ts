@@ -58,6 +58,8 @@ export interface EMIInstallmentDB {
   product_name?: string;
 }
 
+import { assertValidUuid } from './uuidGuard';
+
 export class EMIService {
   /**
    * Creates an EMI Account and generates all installment schedule rows in Supabase.
@@ -75,6 +77,13 @@ export class EMIService {
       return { success: false, error: 'Down payment cannot exceed total amount' };
     }
     if (payload.installment_count <= 0) return { success: false, error: 'Installment count must be at least 1' };
+
+    // 1b. Strict PostgreSQL UUID Pre-flight Guard (Blocks temp-* IDs)
+    assertValidUuid(payload.shop_id, 'shop_id');
+    assertValidUuid(payload.customer_id, 'customer_id');
+    if (payload.transaction_id) {
+      assertValidUuid(payload.transaction_id, 'transaction_id');
+    }
 
     const financedAmount = Math.max(payload.total_amount - payload.down_payment, 0);
 
