@@ -87,10 +87,15 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
     loadEmiAccounts();
   }, [loadEmiAccounts]);
 
-  // Compute Weekly AI Priorities
+  // Extract set of Customer IDs who have active EMI accounts
+  const emiCustomerIds = useMemo(() => {
+    return new Set(realEmiAccounts.map((a) => a.customer_id));
+  }, [realEmiAccounts]);
+
+  // Compute Weekly AI Priorities (excluding EMI customers from Regular Due)
   const recoveryData = useMemo(() => {
-    return generateWeeklyRecoveryPriorities(customers, transactions, shop, language);
-  }, [customers, transactions, shop, language]);
+    return generateWeeklyRecoveryPriorities(customers, transactions, shop, language, emiCustomerIds);
+  }, [customers, transactions, shop, language, emiCustomerIds]);
 
   const deliveryProvider = useMemo(() => new WhatsAppDirectLinkProvider(), []);
 

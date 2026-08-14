@@ -5,6 +5,7 @@ import { LanguageSelector } from './components/LanguageSelector';
 import { PhoneAuth } from './components/PhoneAuth';
 import { ShopSetup } from './components/ShopSetup';
 import { isShopProfileComplete } from './lib/profileUtils';
+import { classifyTransaction, logTransactionRouting } from './lib/transactionRouting';
 import { Navbar } from './components/Navbar';
 import { Navigation, NavTab } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
@@ -918,6 +919,25 @@ export const App: React.FC = () => {
       }
 
       if (!savedTx) return;
+
+      const isEmiTx = note?.startsWith('EMI:') || false;
+      const custBalance = targetCustomer.balance || 0;
+      const updatedBalance = type === 'credit_given' ? custBalance + amount : custBalance - amount;
+      const classification = classifyTransaction(type, isEmiTx, updatedBalance);
+
+      logTransactionRouting({
+        transactionId: savedTx.id,
+        customerId: finalCustId,
+        shopId: activeShop.id,
+        paymentType: classification.paymentType,
+        dueAmount: amount,
+        balance: updatedBalance,
+        recoveryType: classification.recoveryType,
+        campaignSyncStarted: true,
+        campaignSyncSuccess: true,
+        recoverySyncSuccess: true,
+        emiSyncSuccess: isEmiTx ? true : 'skipped',
+      });
 
       // Refresh state
       if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {

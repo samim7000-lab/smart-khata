@@ -217,7 +217,8 @@ export function generateWeeklyRecoveryPriorities(
   customers: Customer[],
   transactions: Transaction[],
   shop: Shop,
-  language: Language = 'en'
+  language: Language = 'en',
+  emiCustomerIds?: Set<string>
 ): {
   recommendations: AIRecoveryAnalysis[];
   weeklyQuota: number;
@@ -228,7 +229,13 @@ export function generateWeeklyRecoveryPriorities(
   const planTier = shop.plan_tier || 'free';
   const weeklyQuota = planTier === 'free' ? 3 : planTier === 'pro' ? 25 : 9999;
 
-  const dueCustomers = customers.filter((c) => (!c.shop_id || c.shop_id === shop.id) && (c.balance || 0) > 0);
+  const dueCustomers = customers.filter((c) => {
+    const isShopMatch = !c.shop_id || c.shop_id === shop.id;
+    const hasBalance = (c.balance || 0) > 0;
+    const isEmiCustomer = emiCustomerIds ? emiCustomerIds.has(c.id) : false;
+    return isShopMatch && hasBalance && !isEmiCustomer;
+  });
+
   const totalOutstandingAmount = dueCustomers.reduce((sum, c) => sum + (c.balance || 0), 0);
 
   const analyses: AIRecoveryAnalysis[] = [];
