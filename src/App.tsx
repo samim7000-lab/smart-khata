@@ -622,6 +622,29 @@ export const App: React.FC = () => {
               .single();
             data = insertRes.data;
             error = insertRes.error;
+
+            if (error && (error.code === '23505' || error.message?.includes('unique constraint') || error.message?.includes('idx_shops_one_active_per_owner'))) {
+              console.warn('[ONBOARDING] Unique active shop constraint triggered. Updating existing active shop...');
+              const { data: existingActive } = await supabase
+                .from('shops')
+                .select('*')
+                .eq('owner_id', user.id)
+                .is('deleted_at', null)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              if (existingActive) {
+                const retryUpdate = await supabase
+                  .from('shops')
+                  .update(fullPayload)
+                  .eq('id', existingActive.id)
+                  .select()
+                  .single();
+                data = retryUpdate.data;
+                error = retryUpdate.error;
+              }
+            }
           }
 
           if (error) {
