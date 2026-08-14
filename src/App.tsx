@@ -1084,26 +1084,39 @@ export const App: React.FC = () => {
   const handleDeleteAccount = async () => {
     if (isSupabaseConfigured && supabase && shop) {
       try {
-        console.log(`[DELETION-ARCHIVE] Archiving shop ${shop.id} for owner_id ${shop.owner_id}`);
-        const nowIso = new Date().toISOString();
-        const { error: archiveErr } = await supabase
-          .from('shops')
-          .update({
-            deleted_at: nowIso,
-            deletion_status: 'DELETED',
-            deletion_requested_at: nowIso,
-            restore_available: true,
-          })
-          .eq('id', shop.id);
+        console.log(`[DELETION-ARCHIVE] Invoking soft_delete_shop for shop ${shop.id}`);
+        
+        // 1. Primary execution via SECURITY DEFINER RPC to guarantee atomic PostgreSQL update
+        const { data: rpcSuccess, error: rpcErr } = await supabase.rpc('soft_delete_shop', {
+          target_shop_id: shop.id,
+        });
 
-        if (archiveErr) {
-          console.error('[DELETION-ARCHIVE] Failed to soft-delete shop:', archiveErr.message);
-        } else {
-          console.log(`[DELETION-ARCHIVE] Shop ${shop.id} marked as DELETED safely in database.`);
+        if (rpcErr || !rpcSuccess) {
+          console.warn('[DELETION-ARCHIVE] RPC soft_delete_shop fallback to direct update:', rpcErr?.message);
+          const nowIso = new Date().toISOString();
+          const { error: archiveErr } = await supabase
+            .from('shops')
+            .update({
+              deleted_at: nowIso,
+              deletion_status: 'DELETED',
+              deletion_requested_at: nowIso,
+              restore_available: true,
+            })
+            .eq('id', shop.id);
+
+          if (archiveErr) {
+            console.error('[DELETION-ARCHIVE] Direct update failed:', archiveErr.message);
+            alert(language === 'bn' ? 'অ্যাকাউন্ট মোছা সম্ভব হয়নি। আবার চেষ্টা করুন।' : 'Failed to delete account. Please try again.');
+            return;
+          }
         }
+
+        console.log(`[DELETION-ARCHIVE] Shop ${shop.id} marked as DELETED safely in database.`);
         await supabase.auth.signOut();
-      } catch (err) {
-        console.error('Account deletion error:', err);
+      } catch (err: any) {
+        console.error('Account deletion exception:', err);
+        alert(language === 'bn' ? 'অ্যাকাউন্ট মোছা সম্ভব হয়নি।' : 'Could not complete account deletion.');
+        return;
       }
     }
 
