@@ -200,6 +200,8 @@ export const App: React.FC = () => {
               owner_name: ownerName,
               preferred_language: language,
               gst_enabled: false,
+              deleted_at: null,
+              deletion_status: 'ACTIVE',
             })
             .select()
             .single();
@@ -379,7 +381,8 @@ export const App: React.FC = () => {
           .from('shops')
           .select('*')
           .eq('owner_id', userId)
-          .order('created_at', { ascending: true });
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false });
 
         if (error) {
           console.error('[SHOP] Error querying public.shops:', error.message);
@@ -577,14 +580,15 @@ export const App: React.FC = () => {
           if (newShopData.logo_url) fullPayload.logo_url = newShopData.logo_url;
           if (newShopData.signature_url) fullPayload.signature_url = newShopData.signature_url;
 
-          // Duplicate shop protection: check if user already has a shop row in DB
-          let targetShopId = shop?.id;
+          // Active shop check: search ONLY for non-deleted active shops for user.id
+          let targetShopId = (shop && !(shop as any).deleted_at) ? shop.id : undefined;
           if (!targetShopId || !isValidUuid(targetShopId)) {
             const { data: existingRows } = await supabase
               .from('shops')
               .select('id')
               .eq('owner_id', user.id)
-              .order('created_at', { ascending: true });
+              .is('deleted_at', null)
+              .order('created_at', { ascending: false });
 
             if (existingRows && existingRows.length > 0) {
               targetShopId = existingRows[0].id;
@@ -595,7 +599,7 @@ export const App: React.FC = () => {
           let error: any = null;
 
           if (targetShopId && isValidUuid(targetShopId)) {
-            // Update existing shop profile
+            // Update existing active shop profile
             const updateRes = await supabase
               .from('shops')
               .update(fullPayload)
@@ -605,10 +609,15 @@ export const App: React.FC = () => {
             data = updateRes.data;
             error = updateRes.error;
           } else {
-            // Insert new shop profile ONLY if no shop exists for owner_id
+            // Insert brand NEW shop profile with a NEW UUID for fresh account setup
+            const insertPayload = {
+              ...fullPayload,
+              deleted_at: null,
+              deletion_status: 'ACTIVE',
+            };
             const insertRes = await supabase
               .from('shops')
-              .insert(fullPayload)
+              .insert(insertPayload)
               .select()
               .single();
             data = insertRes.data;
@@ -625,14 +634,15 @@ export const App: React.FC = () => {
             return;
           }
 
-          // Immediately re-SELECT the saved canonical row from public.shops (Requirement 10)
+          // Immediately re-SELECT the active canonical row from public.shops
           const { data: freshShopRow } = await supabase
             .from('shops')
             .select('*')
             .eq('owner_id', user.id)
-            .order('created_at', { ascending: true })
+            .is('deleted_at', null)
+            .order('created_at', { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle();
 
           const finalRow = freshShopRow || data;
           if (finalRow) {
@@ -767,6 +777,9 @@ export const App: React.FC = () => {
               .from('shops')
               .select('*')
               .eq('owner_id', authUser.user.id)
+              .is('deleted_at', null)
+              .order('created_at', { ascending: false })
+              .limit(1)
               .maybeSingle();
 
             if (dbShop && isValidUuid(dbShop.id)) {
@@ -1069,17 +1082,45 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteAccount = async () => {
-    if (isSupabaseConfigured && supabase) {
+    if (isSupabaseConfigured && supabase && shop) {
       try {
-        if (shop) {
-          await supabase.from('shops').delete().eq('id', shop.id);
+        console.log(`[DELETION-ARCHIVE] Archiving shop ${shop.id} for owner_id ${shop.owner_id}`);
+        const nowIso = new Date().toISOString();
+        const { error: archiveErr } = await supabase
+          .from('shops')
+          .update({
+            deleted_at: nowIso,
+            deletion_status: 'DELETED',
+            deletion_requested_at: nowIso,
+            restore_available: true,
+          })
+          .eq('id', shop.id);
+
+        if (archiveErr) {
+          console.error('[DELETION-ARCHIVE] Failed to soft-delete shop:', archiveErr.message);
+        } else {
+          console.log(`[DELETION-ARCHIVE] Shop ${shop.id} marked as DELETED safely in database.`);
         }
         await supabase.auth.signOut();
       } catch (err) {
         console.error('Account deletion error:', err);
       }
     }
-    await handleLogout();
+
+    // Clear all local client cache and state
+    localStorage.removeItem('smart_khata_mock_shop');
+    localStorage.removeItem('smart_khata_mock_customers');
+    localStorage.removeItem('smart_khata_mock_transactions');
+    localStorage.removeItem('smart_khata_profile_complete');
+    localStorage.removeItem('smart_khata_active_shop_id');
+    localStorage.removeItem('smart_khata_user_shops');
+
+    setShop(null);
+    setCustomers([]);
+    setTransactions([]);
+    setUserShops([]);
+    setAuthUserMeta({ email: null, name: null, avatarUrl: null });
+    setScreen('language_select');
   };
 
   if (isAuthInitializing) {
