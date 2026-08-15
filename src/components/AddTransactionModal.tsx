@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Customer, Language, Shop, TransactionType } from '../types';
+import { Customer, Language, Shop, TransactionType, ReceiptItem, DiscountType, GstPriceMode, ReceiptDetailsPayload } from '../types';
 import { translations } from '../i18n/translations';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { calculateGst, ALLOWED_GST_RATES, GstCalculationResult } from '../lib/gstUtils';
@@ -20,7 +20,12 @@ import {
   FileText,
   Percent,
   MapPin,
-  CreditCard
+  CreditCard,
+  ShoppingBag,
+  Trash2,
+  Plus,
+  Tag,
+  Check
 } from 'lucide-react';
 
 interface Props {
@@ -34,10 +39,11 @@ interface Props {
     type: TransactionType,
     amount: number,
     note: string,
-    newCustomerData?: { name: string; phone: string; displayLabel: string; state?: string },
+    newCustomerData?: { name: string; phone: string; displayLabel: string; state?: string; address?: string; gstin?: string },
     gstDetails?: GstCalculationResult,
     ledgerPhotoUrl?: string,
-    emiDetails?: EMIPayloadData
+    emiDetails?: EMIPayloadData,
+    receiptDetails?: ReceiptDetailsPayload
   ) => void;
 }
 
@@ -71,7 +77,25 @@ export const AddTransactionModal: React.FC<Props> = ({
 
   // GST State
   const [gstRate, setGstRate] = useState<number>(shop.default_gst_rate || 18);
+
+  // Customer Auto-Fill & Detail State
   const [customerState, setCustomerState] = useState<string>(preSelectedCustomer?.state || '');
+  const [customerAddress, setCustomerAddress] = useState<string>(preSelectedCustomer?.address || '');
+  const [customerGstin, setCustomerGstin] = useState<string>(preSelectedCustomer?.gstin || '');
+
+  // Line Items State
+  const [items, setItems] = useState<ReceiptItem[]>([]);
+  const [showItemsSection, setShowItemsSection] = useState(false);
+  const [itemNameInput, setItemNameInput] = useState('');
+  const [itemQtyInput, setItemQtyInput] = useState('1');
+  const [itemUnitPriceInput, setItemUnitPriceInput] = useState('');
+
+  // Discount State
+  const [discountType, setDiscountType] = useState<DiscountType>('fixed');
+  const [discountValStr, setDiscountValStr] = useState('');
+
+  // GST Price Mode State
+  const [gstPriceMode, setGstPriceMode] = useState<GstPriceMode>('exclusive');
 
   const handleNameChange = (val: string) => {
     setNewName(val);
@@ -95,9 +119,12 @@ export const AddTransactionModal: React.FC<Props> = ({
       c.display_label.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // AUTO-FILL CUSTOMER DETAILS ON SELECTION
   const handleSelectCustomer = (c: Customer) => {
     setSelectedCustomer(c);
     setCustomerState(c.state || '');
+    setCustomerAddress(c.address || '');
+    setCustomerGstin(c.gstin || '');
     setIsAddingNewCustomer(false);
   };
 
@@ -105,7 +132,6 @@ export const AddTransactionModal: React.FC<Props> = ({
     e.preventDefault();
     if (!newName.trim()) return;
 
-    // Optional phone validation rule: if phone is not empty, validate strictly
     if (newPhone.trim()) {
       const countryConfig = getCountryByCode(shop.country || 'IN');
       const phoneVal = validatePhoneNumber(newPhone.trim(), countryConfig, language);
@@ -140,15 +166,59 @@ export const AddTransactionModal: React.FC<Props> = ({
     setIsAddingNewCustomer(false);
   };
 
-  // Live GST Calculation
+  // Line Item Handlers
+  const handleAddItem = () => {
+    if (!itemNameInput.trim()) return;
+    const qty = Math.max(1, parseFloat(itemQtyInput) || 1);
+    const unitPrice = Math.max(0, parseFloat(itemUnitPriceInput) || 0);
+    const total = Math.round(qty * unitPrice * 100) / 100;
+
+    const newItem: ReceiptItem = {
+      id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: itemNameInput.trim(),
+      quantity: qty,
+      unit_price: unitPrice,
+      total,
+    };
+
+    setItems((prev) => [...prev, newItem]);
+    setItemNameInput('');
+    setItemQtyInput('1');
+    setItemUnitPriceInput('');
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  };
+
+  // Math Calculations for Subtotal, Discount & GST
+  const itemsSubtotal = items.reduce((sum, item) => sum + item.total, 0);
   const enteredVal = parseFloat(amountStr) || 0;
+  const rawSubtotal = items.length > 0 ? itemsSubtotal : enteredVal;
+
+  const discountVal = parseFloat(discountValStr) || 0;
+  let discountAmount = 0;
+  if (discountVal > 0 && rawSubtotal > 0) {
+    if (discountType === 'percentage') {
+      discountAmount = Math.round((rawSubtotal * (discountVal / 100)) * 100) / 100;
+    } else {
+      discountAmount = Math.min(rawSubtotal, discountVal);
+    }
+  }
+
+  const taxableSubtotal = Math.max(0, rawSubtotal - discountAmount);
+
+  // Live GST Calculation (Supports Inclusive & Exclusive price modes)
   const gstCalc = calculateGst(
-    enteredVal,
+    taxableSubtotal,
     gstRate,
     shop.gst_enabled,
     shop.state,
-    customerState || selectedCustomer?.state
+    customerState || selectedCustomer?.state,
+    gstPriceMode
   );
+
+  const finalTxAmount = shop.gst_enabled ? gstCalc.totalAmount : taxableSubtotal;
 
   // Keypad Handlers
   const handleKeyPress = (num: string) => {
@@ -174,9 +244,8 @@ export const AddTransactionModal: React.FC<Props> = ({
   };
 
   const handleSaveTransaction = () => {
-    if (!selectedCustomer || enteredVal <= 0 || isSubmitting) return;
+    if (!selectedCustomer || finalTxAmount <= 0 || isSubmitting) return;
 
-    // Optional phone validation rule: if customer phone is present, validate strictly before saving
     if (selectedCustomer.phone_number && selectedCustomer.phone_number.trim()) {
       const countryConfig = getCountryByCode(shop.country || 'IN');
       const phoneVal = validatePhoneNumber(selectedCustomer.phone_number.trim(), countryConfig, language);
@@ -195,17 +264,34 @@ export const AddTransactionModal: React.FC<Props> = ({
         phone: selectedCustomer.phone_number,
         displayLabel: selectedCustomer.display_label,
         state: selectedCustomer.state,
+        address: customerAddress,
+        gstin: customerGstin,
       };
     }
 
-    // Save final total amount
+    const receiptDetails: ReceiptDetailsPayload = {
+      items: items.length > 0 ? items : undefined,
+      discount_type: discountVal > 0 ? discountType : undefined,
+      discount_value: discountVal > 0 ? discountVal : undefined,
+      discount_amount: discountAmount > 0 ? discountAmount : undefined,
+      subtotal: rawSubtotal,
+      taxable_amount: taxableSubtotal,
+      gst_price_mode: gstPriceMode,
+      customer_address: customerAddress,
+      customer_gstin: customerGstin,
+      notes: note,
+    };
+
     onSave(
       selectedCustomer.id,
       txType,
-      gstCalc.totalAmount,
+      finalTxAmount,
       note.trim(),
       newCustPayload,
-      shop.gst_enabled ? gstCalc : undefined
+      shop.gst_enabled ? gstCalc : undefined,
+      undefined,
+      undefined,
+      receiptDetails
     );
   };
 
@@ -464,17 +550,174 @@ export const AddTransactionModal: React.FC<Props> = ({
               ) : (
                 <>
 
+              {/* Product / Line Item Details Section */}
+              <div className="bg-slate-50 dark:bg-slate-700/60 p-3 sm:p-3.5 rounded-2xl border border-slate-200 dark:border-slate-600 space-y-2">
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setShowItemsSection(!showItemsSection)}
+                    className="flex items-center space-x-1.5 text-xs font-black text-slate-800 dark:text-slate-200 hover:text-blue-600"
+                  >
+                    <ShoppingBag className="w-4 h-4 text-blue-600" />
+                    <span>{language === 'bn' ? 'পণ্যের তালিকা (Product / Item List)' : 'Product / Item Breakdown'}</span>
+                    <span className="text-[10px] bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-1.5 py-0.5 rounded font-extrabold ml-1">
+                      {items.length} {items.length === 1 ? 'item' : 'items'}
+                    </span>
+                  </button>
+                </div>
+
+                {(showItemsSection || items.length > 0) && (
+                  <div className="space-y-2.5 pt-1">
+                    {/* Items List Table */}
+                    {items.length > 0 && (
+                      <div className="divide-y divide-slate-200 dark:divide-slate-600 max-h-36 overflow-y-auto bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 p-2 text-xs">
+                        {items.map((item) => (
+                          <div key={item.id} className="py-1.5 flex items-center justify-between">
+                            <div className="min-w-0 pr-2">
+                              <div className="font-extrabold text-slate-900 dark:text-white truncate">{item.name}</div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                {item.quantity} x {formatShopCurrency(item.unit_price, shop?.country, shop?.currency_code)}
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2 shrink-0">
+                              <span className="font-black text-slate-900 dark:text-white">
+                                {formatShopCurrency(item.total, shop?.country, shop?.currency_code)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(item.id)}
+                                className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Add New Line Item Row */}
+                    <div className="grid grid-cols-12 gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="Item Name (e.g. Notebook)"
+                        value={itemNameInput}
+                        onChange={(e) => setItemNameInput(e.target.value)}
+                        className="col-span-5 px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-bold outline-none"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="Qty"
+                        value={itemQtyInput}
+                        onChange={(e) => setItemQtyInput(e.target.value)}
+                        className="col-span-2 px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-bold outline-none text-center"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="Price"
+                        value={itemUnitPriceInput}
+                        onChange={(e) => setItemUnitPriceInput(e.target.value)}
+                        className="col-span-3 px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-bold outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddItem}
+                        className="col-span-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl flex items-center justify-center transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Discount Section (Optional) */}
+              <div className="bg-slate-50 dark:bg-slate-700/60 p-3 rounded-2xl border border-slate-200 dark:border-slate-600 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center">
+                    <Tag className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                    <span>{language === 'bn' ? 'ছাড় / ডিসকাউন্ট (Discount)' : 'Discount'}</span>
+                  </span>
+                  <div className="flex space-x-1 bg-white dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-600">
+                    <button
+                      type="button"
+                      onClick={() => setDiscountType('fixed')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                        discountType === 'fixed' ? 'bg-emerald-600 text-white' : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      Fixed ({resolveCurrencySymbol(shop?.country, shop?.currency_code)})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDiscountType('percentage')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                        discountType === 'percentage' ? 'bg-emerald-600 text-white' : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      Percentage (%)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder={discountType === 'percentage' ? 'e.g. 10%' : 'e.g. 50'}
+                    value={discountValStr}
+                    onChange={(e) => setDiscountValStr(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-bold outline-none"
+                  />
+                  {discountAmount > 0 && (
+                    <span className="text-xs font-black text-emerald-600 shrink-0">
+                      -{formatShopCurrency(discountAmount, shop?.country, shop?.currency_code)}
+                    </span>
+                  )}
+                </div>
+              </div>
+
               {/* GST Tax Selector Bar (When GST Enabled) */}
               {shop.gst_enabled && (
-                <div className="bg-blue-50/80 p-3 sm:p-3.5 rounded-2xl border border-blue-200 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-extrabold text-blue-900 flex-wrap gap-1">
+                <div className="bg-blue-50/80 dark:bg-blue-950/60 p-3 sm:p-3.5 rounded-2xl border border-blue-200 dark:border-blue-800 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-extrabold text-blue-900 dark:text-blue-200 flex-wrap gap-1">
                     <span className="flex items-center min-w-0">
                       <Percent className="w-4 h-4 mr-1 text-blue-600 shrink-0" />
                       <span className="truncate">{t.select_gst_rate}</span>
                     </span>
-                    <span className="text-[10px] sm:text-[11px] bg-blue-200 text-blue-800 px-2 py-0.5 rounded-md uppercase shrink-0 truncate max-w-[150px] sm:max-w-none">
+                    <span className="text-[10px] sm:text-[11px] bg-blue-200 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-0.5 rounded-md uppercase shrink-0 truncate max-w-[150px] sm:max-w-none font-black">
                       {gstCalc.taxType === 'intra' ? t.intra_state_tax : t.inter_state_tax}
                     </span>
+                  </div>
+
+                  {/* GST Price Mode Selector (Inclusive vs Exclusive) */}
+                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-white dark:bg-slate-800 rounded-xl border border-blue-200 dark:border-blue-800 text-xs font-extrabold">
+                    <button
+                      type="button"
+                      onClick={() => setGstPriceMode('exclusive')}
+                      className={`py-1.5 px-2 rounded-lg text-[11px] transition-all flex items-center justify-center space-x-1 ${
+                        gstPriceMode === 'exclusive'
+                          ? 'bg-blue-600 text-white shadow-xs font-black'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      {gstPriceMode === 'exclusive' && <Check className="w-3 h-3 stroke-[3]" />}
+                      <span>GST Added to Price</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGstPriceMode('inclusive')}
+                      className={`py-1.5 px-2 rounded-lg text-[11px] transition-all flex items-center justify-center space-x-1 ${
+                        gstPriceMode === 'inclusive'
+                          ? 'bg-blue-600 text-white shadow-xs font-black'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      {gstPriceMode === 'inclusive' && <Check className="w-3 h-3 stroke-[3]" />}
+                      <span>Price Includes GST</span>
+                    </button>
                   </div>
 
                   <div className="flex space-x-1.5">
@@ -486,7 +729,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                         className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all ${
                           gstRate === rate
                             ? 'bg-blue-600 text-white shadow-xs'
-                            : 'bg-white text-slate-700 hover:bg-blue-100 border border-slate-200'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-blue-100 border border-slate-200 dark:border-slate-700'
                         }`}
                       >
                         {rate}%
@@ -495,18 +738,18 @@ export const AddTransactionModal: React.FC<Props> = ({
                   </div>
 
                   {gstCalc.taxAmount > 0 && (
-                    <div className="text-xs space-y-0.5 pt-1 text-blue-950 font-medium">
+                    <div className="text-xs space-y-0.5 pt-1 text-blue-950 dark:text-blue-100 font-medium">
                       <div className="flex justify-between">
                         <span>{t.base_amount}:</span>
-                        <span>{formatShopCurrency(gstCalc.baseAmount, shop?.country, shop?.currency_code)}</span>
+                        <span className="font-bold">{formatShopCurrency(gstCalc.baseAmount, shop?.country, shop?.currency_code)}</span>
                       </div>
                       {gstCalc.taxType === 'intra' ? (
-                        <div className="flex justify-between text-[11px] text-blue-800 font-bold">
+                        <div className="flex justify-between text-[11px] text-blue-800 dark:text-blue-300 font-bold">
                           <span>{t.cgst} ({gstRate / 2}%) + {t.sgst} ({gstRate / 2}%):</span>
                           <span>+{formatShopCurrency(gstCalc.taxAmount, shop?.country, shop?.currency_code)}</span>
                         </div>
                       ) : (
-                        <div className="flex justify-between text-[11px] text-blue-800 font-bold">
+                        <div className="flex justify-between text-[11px] text-blue-800 dark:text-blue-300 font-bold">
                           <span>{t.igst} ({gstRate}%):</span>
                           <span>+{formatShopCurrency(gstCalc.taxAmount, shop?.country, shop?.currency_code)}</span>
                         </div>
@@ -523,33 +766,35 @@ export const AddTransactionModal: React.FC<Props> = ({
                 </div>
                 <div className="text-2xl sm:text-4xl font-black mt-1 tracking-tight flex items-center justify-center min-w-0">
                   <span className="text-slate-400 text-xl sm:text-2xl mr-1 shrink-0">{resolveCurrencySymbol(shop?.country, shop?.currency_code)}</span>
-                  <span className={`truncate max-w-full ${enteredVal > 0 ? 'text-white' : 'text-slate-600'}`}>
-                    {gstCalc.totalAmount.toLocaleString() || '0'}
+                  <span className={`truncate max-w-full ${finalTxAmount > 0 ? 'text-white' : 'text-slate-600'}`}>
+                    {finalTxAmount.toLocaleString() || '0'}
                   </span>
                 </div>
               </div>
 
-              {/* Keypad */}
-              <div className="grid grid-cols-3 gap-2">
-                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
-                  <button key={num} type="button" onClick={() => handleKeyPress(num)} className="num-btn">
-                    {num}
+              {/* Keypad (Only active when no line items are added) */}
+              {items.length === 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                    <button key={num} type="button" onClick={() => handleKeyPress(num)} className="num-btn">
+                      {num}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={handleClear}
+                    className="num-btn bg-slate-200 hover:bg-slate-300 text-slate-700 font-extrabold text-xs uppercase"
+                  >
+                    {t.clear_keypad}
                   </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  className="num-btn bg-slate-200 hover:bg-slate-300 text-slate-700 font-extrabold text-xs uppercase"
-                >
-                  {t.clear_keypad}
-                </button>
-                <button type="button" onClick={() => handleKeyPress('0')} className="num-btn">
-                  0
-                </button>
-                <button type="button" onClick={handleBackspace} className="num-btn bg-slate-200 hover:bg-slate-300 text-slate-700">
-                  <Delete className="w-6 h-6" />
-                </button>
-              </div>
+                  <button type="button" onClick={() => handleKeyPress('0')} className="num-btn">
+                    0
+                  </button>
+                  <button type="button" onClick={handleBackspace} className="num-btn bg-slate-200 hover:bg-slate-300 text-slate-700">
+                    <Delete className="w-6 h-6" />
+                  </button>
+                </div>
+              )}
 
               {/* Note Input */}
               <div className="relative">
@@ -566,7 +811,7 @@ export const AddTransactionModal: React.FC<Props> = ({
               {/* Save Button */}
               <button
                 type="button"
-                disabled={enteredVal <= 0 || isSubmitting}
+                disabled={finalTxAmount <= 0 || isSubmitting}
                 onClick={handleSaveTransaction}
                 className={`w-full py-4 font-extrabold text-lg rounded-2xl shadow-xl flex items-center justify-center space-x-2 transition-all active:scale-[0.98] ${
                   txType === 'credit_given'

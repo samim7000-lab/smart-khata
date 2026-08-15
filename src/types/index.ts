@@ -40,6 +40,8 @@ export interface Customer {
   phone_number: string;
   display_label: string;
   state?: string; // Customer state for GST intra vs inter-state detection
+  address?: string;
+  gstin?: string;
   created_at: string;
   balance?: number; // Positive = customer owes money (credit), Negative = customer overpaid, 0 = settled
 }
@@ -47,6 +49,31 @@ export interface Customer {
 export type TransactionType = 'credit_given' | 'payment_received' | 'void_correction';
 
 export type TaxType = 'intra' | 'inter' | 'none';
+export type DiscountType = 'fixed' | 'percentage';
+export type GstPriceMode = 'inclusive' | 'exclusive';
+
+export interface ReceiptItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+}
+
+export interface ReceiptDetailsPayload {
+  items?: ReceiptItem[];
+  discount_type?: DiscountType;
+  discount_value?: number;
+  discount_amount?: number;
+  subtotal?: number;
+  taxable_amount?: number;
+  gst_price_mode?: GstPriceMode;
+  previous_balance?: number;
+  customer_address?: string;
+  customer_gstin?: string;
+  receipt_number?: string;
+  notes?: string;
+}
 
 export interface Transaction {
   id: string;
@@ -66,6 +93,10 @@ export interface Transaction {
   sgst_amount?: number;
   igst_amount?: number;
   tax_type?: TaxType;
+  gst_price_mode?: GstPriceMode;
+
+  // Structured Receipt Line Items & Discount Payload
+  receipt_details?: ReceiptDetailsPayload;
   
   // Reversible Audit Correction Fields
   is_voided?: boolean;

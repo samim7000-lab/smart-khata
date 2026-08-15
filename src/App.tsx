@@ -27,7 +27,8 @@ import { UpgradeModal } from './components/UpgradeModal';
 import { CampaignsScreen } from './components/CampaignsScreen';
 import { AIRecoveryDashboard } from './components/AIRecoveryDashboard';
 import { SmartKhataLogo } from './components/SmartKhataLogo';
-import { PlanTier } from './types';
+import { PlanTier, ReceiptDetailsPayload } from './types';
+import { packReceiptNote } from './lib/receiptUtils';
 import {
   isSupabaseConfigured,
   isDevAuth,
@@ -779,10 +780,11 @@ export const App: React.FC = () => {
     type: TransactionType,
     amount: number,
     note: string,
-    newCustomerData?: { name: string; phone: string; displayLabel: string; state?: string },
+    newCustomerData?: { name: string; phone: string; displayLabel: string; state?: string; address?: string; gstin?: string },
     gstDetails?: any,
     ledgerPhotoUrl?: string,
-    emiDetails?: EMIPayloadData
+    emiDetails?: EMIPayloadData,
+    receiptDetails?: ReceiptDetailsPayload
   ) => {
     if (!shop || isSavingTxRef.current) return;
     isSavingTxRef.current = true;
@@ -908,12 +910,13 @@ export const App: React.FC = () => {
       if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
         try {
           console.log(`[UUID-GUARD] Inserting Transaction into DB for shop_id: ${activeShop.id}, customer_id: ${finalCustId}`);
+          const packedNote = packReceiptNote(note || '', receiptDetails);
           const txPayload: any = {
             shop_id: activeShop.id,
             customer_id: finalCustId, // REAL DB UUID!
             type,
             amount,
-            note: note || '',
+            note: packedNote,
             ...txGstPayload,
           };
 
@@ -942,21 +945,23 @@ export const App: React.FC = () => {
           if (error || !data) throw error || new Error('Transaction insertion failed');
 
           console.log(`[UUID-GUARD] Transaction inserted successfully into DB. Real DB UUID: ${data.id}`);
-          savedTx = data;
+          savedTx = { ...data, receipt_details: receiptDetails };
         } catch (err: any) {
           console.error('[UUID-GUARD] Supabase transaction insert error:', err);
           alert('Failed to save transaction: ' + err.message);
           return;
         }
       } else {
+        const packedNote = packReceiptNote(note || '', receiptDetails);
         savedTx = {
           id: `tx-${Date.now()}`,
           shop_id: activeShop.id,
           customer_id: finalCustId,
           type,
           amount,
-          note,
+          note: packedNote,
           ledger_photo_url: ledgerPhotoUrl,
+          receipt_details: receiptDetails,
           created_at: new Date().toISOString(),
           ...txGstPayload,
         };
@@ -1422,6 +1427,7 @@ export const App: React.FC = () => {
           customer={receiptModalData.customer}
           shop={shop}
           language={language}
+          transactions={transactions}
           onClose={() => setReceiptModalData(null)}
         />
       )}
