@@ -43,6 +43,9 @@ export function replaceMessageVariables(
   shop: Shop,
   customVars?: Record<string, string>
 ): string {
+  const custName = customer.display_label || customer.name || 'Valued Customer';
+  const shopName = shop?.shop_name || 'Smart Khata Store';
+  const ownerName = shop?.owner_name || 'Store Owner';
   const dueAmt = customer.balance && customer.balance > 0 ? customer.balance : 0;
   const formattedDue = formatShopCurrency(dueAmt, shop?.country, shop?.currency_code);
   const todayStr = new Date().toLocaleDateString('en-US', {
@@ -50,23 +53,38 @@ export function replaceMessageVariables(
     month: 'short',
     year: 'numeric',
   });
+  const shopAddr = shop?.full_address || shop?.city || shop?.state || '';
 
-  return template
-    .replace(/{{customer_name}}/g, customer.display_label || customer.name || 'Valued Customer')
-    .replace(/{customer_name}/g, customer.display_label || customer.name || 'Valued Customer')
-    .replace(/{{store_name}}/g, shop.shop_name || 'Smart Khata Store')
-    .replace(/{shop_name}/g, shop.shop_name || 'Smart Khata Store')
-    .replace(/{{owner_name}}/g, shop.owner_name || 'Store Owner')
-    .replace(/{{due_amount}}/g, formattedDue)
-    .replace(/{{amount_due}}/g, formattedDue)
-    .replace(/{due_amount}/g, formattedDue)
-    .replace(/{amount_due}/g, formattedDue)
-    .replace(/{{phone}}/g, customer.phone_number || '')
-    .replace(/{{payment_link}}/g, 'https://smartkhata.app/pay')
-    .replace(/{{today}}/g, todayStr)
-    .replace(/{{invoice_ref}}/g, `INV-${Date.now().toString().slice(-6)}`)
-    .replace(/{{invoice_number}}/g, `INV-${Date.now().toString().slice(-6)}`)
-    .replace(/{{shop_address}}/g, shop.full_address || shop.city || shop.state || 'Main Market');
+  let res = template
+    .replace(/{{?customer_name}}?/gi, custName)
+    .replace(/{{?customerName}}?/g, custName)
+    .replace(/{{?store_name}}?/gi, shopName)
+    .replace(/{{?shop_name}}?/gi, shopName)
+    .replace(/{{?shopName}}?/g, shopName)
+    .replace(/{{?owner_name}}?/gi, ownerName)
+    .replace(/{{?ownerName}}?/g, ownerName)
+    .replace(/{{?due_amount}}?/gi, formattedDue)
+    .replace(/{{?amount_due}}?/gi, formattedDue)
+    .replace(/{{?dueAmount}}?/g, formattedDue)
+    .replace(/{{?phone}}?/gi, customer.phone_number || '')
+    .replace(/{{?payment_link}}?/gi, 'https://smartkhata.app/pay')
+    .replace(/{{?today}}?/gi, todayStr)
+    .replace(/{{?invoice_ref}}?/gi, `INV-${Date.now().toString().slice(-6)}`)
+    .replace(/{{?invoice_number}}?/gi, `INV-${Date.now().toString().slice(-6)}`)
+    .replace(/{{?shop_address}}?/gi, shopAddr)
+    .replace(/{{?shopAddress}}?/g, shopAddr);
+
+  if (customVars) {
+    Object.entries(customVars).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) {
+        const regex = new RegExp(`{{?${k}}}?`, 'gi');
+        res = res.replace(regex, v);
+      }
+    });
+  }
+
+  // Gracefully clean up any unreplaced {{variable}} or {variable} tags so broken placeholders never appear
+  return res.replace(/{{?[a-zA-Z0-9_]+}}?/g, '').trim();
 }
 
 /**

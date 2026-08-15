@@ -178,7 +178,7 @@ export function analyzeCustomerRecovery(
   let rawTemplate = '';
   if (language === 'bn') {
     rawTemplate =
-      'আসসালামু আলাইকুম {{customer_name}},\n\n{{store_name}} থেকে বকেয়া পরিশোধের বিনীত অনুরোধ। {{today}} তারিখ পর্যন্ত আপনার মোট বাকি টাকার পরিমাণ {{due_amount}}।\n\nঅনুগৃহ করে সুবিধামতো পেমেন্ট করে দিন।\nদোকানের ঠিকানা: {{shop_address}}\n\nধন্যবাদ!';
+      'হ্যালো {{customer_name}},\n\n{{store_name}} থেকে বকেয়া পরিশোধের বিনীত অনুরোধ। {{today}} তারিখ পর্যন্ত আপনার মোট বাকি টাকার পরিমাণ {{due_amount}}।\n\nঅনুগৃহ করে সুবিধামতো পেমেন্ট করে দিন।\nদোকানের ঠিকানা: {{shop_address}}\n\nধন্যবাদ!';
   } else if (language === 'hi') {
     rawTemplate =
       'नमस्ते {{customer_name}},\n\n{{store_name}} से बकाया भुगतान का विनम्र निवेदन। {{today}} तक आपकी कुल बकाया राशि {{due_amount}} है।\n\nकृपया अपनी सुविधा अनुसार भुगतान करें।\nदुकान का पता: {{shop_address}}\n\nधन्यवाद!';

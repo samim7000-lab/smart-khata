@@ -55,6 +55,7 @@ type CampaignTab = 'builder' | 'history';
 import { formatShopCurrency } from '../lib/countryPricing';
 import { CampaignService, CampaignRecord, CampaignRecipientRecord, DeliveryMode } from '../lib/campaignService';
 import { generateWeeklyRecoveryPriorities } from '../lib/aiRecoveryEngine';
+import { CAMPAIGN_CATEGORIES, getCampaignDraft, CampaignGoalCategory } from '../lib/campaignTemplates';
 
 export const CampaignsScreen: React.FC<Props> = ({
   shop,
@@ -108,28 +109,34 @@ export const CampaignsScreen: React.FC<Props> = ({
     CampaignService.getCampaigns(shop.id).then((records) => setPastCampaigns(records));
   }, [shop.id]);
 
-  // Helper for initial default campaign message by app language
-  const getDefaultCampaignMessage = (lang: Language) => {
-    if (lang === 'bn') {
-      return 'প্রিয় {{customer_name}},\n\n{{store_name}} থেকে বকেয়া পরিশোধের আপডেট। {{today}} তারিখ পর্যন্ত আপনার বর্তমান বাকি টাকার পরিমাণ {{due_amount}}।\n\nদোকানের ঠিকানা: {{shop_address}}\nইনভয়েস রেফ: {{invoice_number}}\n\nধন্যবাদ!';
-    }
-    if (lang === 'hi') {
-      return 'प्रिय {{customer_name}},\n\n{{store_name}} की तरफ से एक विनम्र जानकारी। {{today}} तक आपका वर्तमान बकाया {{due_amount}} है।\n\nदुकान का पता: {{shop_address}}\nइनवॉइस सं: {{invoice_number}}\n\nधन्यवाद!';
-    }
-    return 'Dear {{customer_name}},\n\nThis is a friendly update from {{store_name}}. Your current pending balance is {{due_amount}} as of {{today}}.\n\nShop Address: {{shop_address}}\nInvoice Ref: {{invoice_number}}\n\nThank you!';
-  };
-
   // 5-Step Campaign Wizard State
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4 | 5>(1);
-  const [campaignGoal, setCampaignGoal] = useState<'new_product' | 'discount' | 'festival' | 'bring_back' | 'loyal' | 'old_stock'>('new_product');
+  const [campaignGoal, setCampaignGoal] = useState<CampaignGoalCategory>('new_product');
+  const [isManuallyEdited, setIsManuallyEdited] = useState<boolean>(false);
 
-  // Message Composer State
-  const [messageText, setMessageText] = useState(() => getDefaultCampaignMessage(language));
+  // Message Composer State initialized with category-specific template
+  const [messageText, setMessageText] = useState(() => getCampaignDraft('new_product', language));
 
-  // Sync default template when app language changes
+  // Category switch handler with manual-edit protection
+  const handleGoalChange = (newGoal: CampaignGoalCategory) => {
+    setCampaignGoal(newGoal);
+    if (!isManuallyEdited) {
+      setMessageText(getCampaignDraft(newGoal, language));
+    }
+  };
+
+  // Reset message text to auto-generated draft for current category & language
+  const handleResetDraft = () => {
+    setMessageText(getCampaignDraft(campaignGoal, language));
+    setIsManuallyEdited(false);
+  };
+
+  // Sync category template when language or category changes (only if not manually edited)
   React.useEffect(() => {
-    setMessageText(getDefaultCampaignMessage(language));
-  }, [language]);
+    if (!isManuallyEdited) {
+      setMessageText(getCampaignDraft(campaignGoal, language));
+    }
+  }, [language, campaignGoal, isManuallyEdited]);
 
   // Delivery Provider Engine
   const deliveryProvider: IDeliveryProvider = useMemo(() => new WhatsAppDirectLinkProvider(), []);
@@ -266,9 +273,10 @@ export const CampaignsScreen: React.FC<Props> = ({
     const analysis = generateWeeklyRecoveryPriorities(customers, transactions, shop, language);
     const topCustIds = analysis.recommendations.slice(0, 10).map((rec) => rec.customer.id);
     setSelectedCustomerIds(new Set(topCustIds));
+    setIsManuallyEdited(true);
     if (language === 'bn') {
       setMessageText(
-        'আসসালামু আলাইকুম {{customer_name}},\n\n{{store_name}} থেকে বকেয়া পরিশোধের বিনীত অনুরোধ। {{today}} তারিখ পর্যন্ত আপনার মোট বাকি টাকার পরিমাণ {{due_amount}}।\n\nঅনুগৃহ করে সুবিধামতো পেমেন্ট করে দিন।\nদোকানের ঠিকানা: {{shop_address}}\n\nধন্যবাদ!'
+        'হ্যালো {{customer_name}},\n\n{{store_name}} থেকে বকেয়া পরিশোধের বিনীত অনুরোধ। {{today}} তারিখ পর্যন্ত আপনার মোট বাকি টাকার পরিমাণ {{due_amount}}।\n\nঅনুগৃহ করে সুবিধামতো পেমেন্ট করে দিন।\nদোকানের ঠিকানা: {{shop_address}}\n\nধন্যবাদ!'
       );
     } else if (language === 'hi') {
       setMessageText(
@@ -514,20 +522,13 @@ export const CampaignsScreen: React.FC<Props> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {[
-                  { id: 'new_product', title: 'New Product', icon: '📦', bn: 'নতুন পণ্য ঘোষণা', desc: 'Announce new arrivals to your customers' },
-                  { id: 'discount', title: 'Discount / Sale', icon: '🏷️', bn: 'ছাড় / বিশেষ ডিসকাউন্ট', desc: 'Send percentage or cash discounts' },
-                  { id: 'festival', title: 'Festival Offer', icon: '🎉', bn: 'উৎসবের অফার (Eid / Puja / Diwali)', desc: 'Greet & offer festival discounts' },
-                  { id: 'bring_back', title: 'Bring Back Inactive', icon: '🔄', bn: 'পুরাতন কাস্টমার ফেরত আনুন', desc: 'Re-engage customers who havent visited' },
-                  { id: 'loyal', title: 'Loyal Customer Offer', icon: '⭐', bn: 'নিয়মিত কাস্টমার বিশেষ অফার', desc: 'Reward your top VIP repeat buyers' },
-                  { id: 'old_stock', title: 'Stock Clearance', icon: '🧹', bn: 'পুরানো স্টক ক্লিয়ারেন্স', desc: 'Sell remaining stock fast at special price' },
-                ].map((g) => {
+                {CAMPAIGN_CATEGORIES.map((g) => {
                   const isSel = campaignGoal === g.id;
                   return (
                     <button
                       key={g.id}
                       type="button"
-                      onClick={() => setCampaignGoal(g.id as any)}
+                      onClick={() => handleGoalChange(g.id)}
                       className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between space-y-2 min-h-[80px] ${
                         isSel
                           ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/60 shadow-md'
@@ -537,10 +538,12 @@ export const CampaignsScreen: React.FC<Props> = ({
                       <div className="flex items-center space-x-2">
                         <span className="text-2xl">{g.icon}</span>
                         <span className="font-extrabold text-sm text-slate-900 dark:text-white">
-                          {language === 'bn' ? g.bn : g.title}
+                          {language === 'bn' ? g.bnTitle : language === 'hi' ? g.hiTitle : g.title}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{g.desc}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                        {language === 'bn' ? g.bnDesc : g.desc}
+                      </p>
                     </button>
                   );
                 })}
@@ -711,12 +714,31 @@ export const CampaignsScreen: React.FC<Props> = ({
             {/* Message Composer & Media Attachment */}
             <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xs space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center">
-                  <MessageSquare className="w-4 h-4 mr-1.5 text-emerald-600" />
-                  Message Composer
-                </h3>
+                <div className="flex items-center space-x-2">
+                  <MessageSquare className="w-4 h-4 text-emerald-600" />
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                    Message Composer
+                  </h3>
+                  {isManuallyEdited && (
+                    <span className="px-2 py-0.5 text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300 rounded-md">
+                      {language === 'bn' ? 'সম্পাদিত' : 'Customized'}
+                    </span>
+                  )}
+                </div>
 
                 <div className="flex space-x-1.5">
+                  {isManuallyEdited && (
+                    <button
+                      type="button"
+                      onClick={handleResetDraft}
+                      className="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-600 dark:text-slate-300 font-extrabold text-[11px] rounded-xl flex items-center space-x-1 border border-slate-200 dark:border-slate-600"
+                      title="Reset message to category default template"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>{language === 'bn' ? 'রিসেট' : 'Reset'}</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={handleImportAIRecoveryPriorities}
@@ -724,7 +746,7 @@ export const CampaignsScreen: React.FC<Props> = ({
                     title="Import Top AI Overdue Recovery Priorities"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Import AI Priorities</span>
+                    <span>AI Priorities</span>
                   </button>
 
                   <button
@@ -738,13 +760,39 @@ export const CampaignsScreen: React.FC<Props> = ({
                 </div>
               </div>
 
+              {/* Category Pills Bar inside Composer for fast switching */}
+              <div className="flex items-center space-x-1 overflow-x-auto pb-1 pt-1 border-t border-slate-100 dark:border-slate-700/60">
+                <span className="text-[10px] font-bold text-slate-400 uppercase mr-1 shrink-0">Category:</span>
+                {CAMPAIGN_CATEGORIES.map((cat) => {
+                  const isSel = campaignGoal === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => handleGoalChange(cat.id)}
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold shrink-0 transition-all flex items-center space-x-1 ${
+                        isSel
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>{cat.icon}</span>
+                      <span>{language === 'bn' ? cat.bnTitle : language === 'hi' ? cat.hiTitle : cat.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
               {/* Variable Chips */}
               <div className="flex flex-wrap gap-1">
                 {dynamicVars.map((v) => (
                   <button
                     key={v.tag}
                     type="button"
-                    onClick={() => setMessageText((prev) => prev + ` ${v.tag} `)}
+                    onClick={() => {
+                      setMessageText((prev) => prev + ` ${v.tag} `);
+                      setIsManuallyEdited(true);
+                    }}
                     className="px-2 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-blue-600 hover:text-white text-slate-700 dark:text-slate-200 font-extrabold text-[10px] rounded-lg border border-slate-200 dark:border-slate-600 transition-colors"
                   >
                     +{v.label}
@@ -755,7 +803,10 @@ export const CampaignsScreen: React.FC<Props> = ({
               <textarea
                 rows={5}
                 value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
+                onChange={(e) => {
+                  setMessageText(e.target.value);
+                  setIsManuallyEdited(true);
+                }}
                 placeholder="Write your campaign text..."
                 className="w-full p-3 bg-white dark:bg-slate-800 text-gray-900 dark:text-white placeholder-gray-400 rounded-2xl border-2 border-slate-200 dark:border-slate-700 focus:border-blue-600 outline-none font-semibold text-xs leading-relaxed"
               />
