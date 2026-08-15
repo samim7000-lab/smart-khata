@@ -14,7 +14,6 @@ export const printTransactionReceiptPDF = (
   const t = translations[language];
   const isCredit = tx.type === 'credit_given';
   const isVoid = tx.type === 'void_correction' || tx.is_voided;
-  const typeLabel = isVoid ? t.void_correction : isCredit ? (language === 'bn' ? 'বাকি বিক্রি (Credit Given)' : 'Credit / Due Sale') : (language === 'bn' ? 'নগদ জমা (Payment Received)' : 'Payment Received');
   const fmt = (amt: number) => formatShopCurrency(amt, shop?.country, shop?.currency_code);
 
   const dateObj = new Date(tx.created_at);
@@ -28,34 +27,54 @@ export const printTransactionReceiptPDF = (
   );
 
   const { noteText, details } = unpackReceiptNote(tx);
+  const mode = details?.mode || (isCredit ? 'credit_sale' : 'due_payment');
+
+  let typeLabel = '';
+  if (language === 'bn') {
+    typeLabel = isVoid ? 'ভয়েড / সংশোধন' : mode === 'cash_sale' ? 'নগদ বিক্রি' : mode === 'credit_sale' ? 'বাকি বিক্রি' : 'বাকি আদায় / জমা';
+  } else {
+    typeLabel = isVoid ? 'Void / Correction' : mode === 'cash_sale' ? 'Cash Sale (Paid)' : mode === 'credit_sale' ? 'Credit Sale (Due)' : 'Payment Received';
+  }
 
   // Deterministic previous balance & current balance
   const prevBalance = calculatePreviousBalance(tx, customer, allTransactions);
   const txAmt = Number(tx.amount) || 0;
-  const currentBalance = isCredit ? prevBalance + txAmt : Math.max(0, prevBalance - txAmt);
+  
+  let currentBalance = 0;
+  if (mode === 'cash_sale') {
+    currentBalance = Math.max(0, prevBalance);
+  } else if (mode === 'credit_sale') {
+    const newDue = details?.new_due_amount !== undefined ? details.new_due_amount : txAmt;
+    currentBalance = prevBalance + newDue;
+  } else {
+    currentBalance = Math.max(0, prevBalance - txAmt);
+  }
+
   const isFullyPaid = currentBalance <= 0;
 
-  // Line items
-  const lineItems = details?.items && details.items.length > 0 ? details.items : [
-    {
+  // Item list
+  const isPurePayment = mode === 'due_payment';
+  const hasItems = !isPurePayment && details?.items && details.items.length > 0;
+  const lineItems = hasItems ? details.items! : (
+    !isPurePayment ? [{
       id: 'default-item',
-      name: noteText || (isCredit ? 'Credit Transaction Item' : 'Payment Received'),
+      name: noteText || 'General Item Purchase',
       quantity: 1,
       unit_price: txAmt,
       total: txAmt,
-    }
-  ];
+    }] : []
+  );
 
   const subtotal = details?.subtotal !== undefined ? details.subtotal : txAmt;
   const discountAmt = details?.discount_amount || 0;
   const taxableAmt = details?.taxable_amount !== undefined ? details.taxable_amount : Math.max(0, subtotal - discountAmt);
-  const hasGst = shop.gst_enabled && tx.tax_amount && tx.tax_amount > 0;
+  const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && tx.tax_amount && tx.tax_amount > 0));
   const gstPriceMode = details?.gst_price_mode || tx.gst_price_mode || 'exclusive';
 
   const receiptNumber = details?.receipt_number || `INV-${tx.id.replace(/\D/g, '').slice(-6) || Date.now().toString().slice(-6)}`;
   const shopAddressStr = shop.full_address || [shop.city, shop.state, shop.postal_code].filter(Boolean).join(', ');
-  const customerAddressStr = details?.customer_address || customer.address || customer.state || '';
-  const customerGstinStr = details?.customer_gstin || customer.gstin || '';
+  const customerAddressStr = (details?.customer_address || customer.address || customer.state || '').trim();
+  const customerGstinStr = (details?.customer_gstin || customer.gstin || '').trim();
 
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
@@ -228,77 +247,114 @@ export const printTransactionReceiptPDF = (
           </div>
         </div>
 
-        <!-- ITEMS TABLE -->
-        <table class="items-table">
-          <thead>
-            <tr>
-              <th style="text-align:left;">Item Description</th>
-              <th style="text-align:center;">Qty</th>
-              <th style="text-align:right;">Unit Price</th>
-              <th style="text-align:right;">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${lineItems.map((item) => `
+        <!-- ITEMS TABLE (Only rendered if NOT pure payment!) -->
+        ${!isPurePayment && lineItems.length > 0 ? `
+          <table class="items-table">
+            <thead>
               <tr>
-                <td style="font-weight:700;">${item.name}</td>
-                <td style="text-align:center;">${item.quantity}</td>
-                <td style="text-align:right;">${fmt(item.unit_price)}</td>
-                <td style="text-align:right; font-weight:700;">${fmt(item.total)}</td>
+                <th style="text-align:left;">Item Description</th>
+                <th style="text-align:center;">Qty</th>
+                <th style="text-align:right;">Unit Price</th>
+                <th style="text-align:right;">Amount</th>
               </tr>
-            `).join('')}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              ${lineItems.map((item) => `
+                <tr>
+                  <td style="font-weight:700;">${item.name}</td>
+                  <td style="text-align:center;">${item.quantity}</td>
+                  <td style="text-align:right;">${fmt(item.unit_price)}</td>
+                  <td style="text-align:right; font-weight:700;">${fmt(item.total)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : ''}
 
         <!-- FINANCIAL BREAKDOWN -->
-        <div class="breakdown-box">
-          <div class="breakdown-row">
-            <span>Subtotal:</span>
-            <span style="font-weight:700;">${fmt(subtotal)}</span>
-          </div>
-          ${discountAmt > 0 ? `
-            <div class="breakdown-row" style="color:#047857; font-weight:800;">
-              <span>Discount (${details?.discount_type === 'percentage' ? `${details.discount_value}%` : 'Fixed'}):</span>
-              <span>-${fmt(discountAmt)}</span>
+        ${!isPurePayment ? `
+          <div class="breakdown-box">
+            <div class="breakdown-row">
+              <span>Subtotal:</span>
+              <span style="font-weight:700;">${fmt(subtotal)}</span>
             </div>
-          ` : ''}
-          ${hasGst ? `
-            <div class="breakdown-row" style="border-top:1px solid #e2e8f0; padding-top:4px;">
-              <span>Taxable Base Amount:</span>
-              <span style="font-weight:700;">${fmt(taxableAmt)}</span>
-            </div>
-            <div style="background:#eff6ff; padding:8px; border-radius:8px; margin:6px 0; font-size:11px;">
-              <div style="display:flex; justify-between; font-weight:800; color:#1e3a8a;">
-                <span>GST (${tx.gst_rate}% - ${gstPriceMode === 'inclusive' ? 'Inclusive' : 'Added'}):</span>
-                <span>+${fmt(tx.tax_amount || 0)}</span>
+            ${discountAmt > 0 ? `
+              <div class="breakdown-row" style="color:#047857; font-weight:800;">
+                <span>Discount (${details?.discount_type === 'percentage' ? `${details.discount_value}%` : 'Fixed'}):</span>
+                <span>-${fmt(discountAmt)}</span>
               </div>
+            ` : ''}
+            ${hasGst ? `
+              <div class="breakdown-row" style="border-top:1px solid #e2e8f0; padding-top:4px;">
+                <span>Taxable Base Amount:</span>
+                <span style="font-weight:700;">${fmt(taxableAmt)}</span>
+              </div>
+              <div style="background:#eff6ff; padding:8px; border-radius:8px; margin:6px 0; font-size:11px;">
+                <div style="display:flex; justify-between; font-weight:800; color:#1e3a8a;">
+                  <span>GST (${tx.gst_rate || 18}% - ${gstPriceMode === 'inclusive' ? 'Inclusive' : 'Added'}):</span>
+                  <span>+${fmt(tx.tax_amount || 0)}</span>
+                </div>
+              </div>
+            ` : ''}
+            <div class="breakdown-row" style="border-top:2px solid #cbd5e1; padding-top:8px; font-size:14px; font-weight:900;">
+              <span>Grand Total (${typeLabel}):</span>
+              <span style="color:${mode === 'credit_sale' ? '#dc2626' : '#059669'};">${fmt(txAmt)}</span>
             </div>
-          ` : ''}
-          <div class="breakdown-row" style="border-top:2px solid #cbd5e1; padding-top:8px; font-size:14px; font-weight:900;">
-            <span>Grand Total (${typeLabel}):</span>
-            <span style="color:${isCredit ? '#dc2626' : '#059669'};">${fmt(txAmt)}</span>
           </div>
-        </div>
+        ` : ''}
 
         <!-- BAKI / BALANCE BREAKDOWN -->
         <div class="baki-box">
-          <div class="baki-row" style="border-bottom:1px solid #334155; padding-bottom:6px;">
-            <span>Previous Baki (Before this tx):</span>
-            <span style="font-weight:800; font-size:13px;">${fmt(prevBalance)}</span>
-          </div>
-          <div class="baki-row" style="margin-top:6px;">
-            <span>Current Transaction Amount:</span>
-            <span style="font-weight:800; color:${isCredit ? '#f87171' : '#34d399'};">${isCredit ? '+' : '-'}${fmt(txAmt)}</span>
-          </div>
-          <div class="baki-row" style="border-top:1px solid #334155; padding-top:8px; margin-top:6px; font-size:14px; font-weight:900;">
-            <div>
-              <span>Current Outstanding Baki:</span>
-              <div style="margin-top:2px;">
-                ${isFullyPaid ? '<span class="badge badge-paid">✓ FULLY PAID</span>' : '<span class="badge badge-due">⚠️ DUE BALANCE</span>'}
-              </div>
+          ${mode === 'cash_sale' ? `
+            <div class="baki-row">
+              <span>Payment Amount:</span>
+              <span style="font-weight:800; color:#34d399;">${fmt(txAmt)}</span>
             </div>
-            <span style="font-size:18px; color:${currentBalance > 0 ? '#f87171' : '#34d399'};">${fmt(currentBalance)}</span>
-          </div>
+            <div class="baki-row" style="border-top:1px solid #334155; padding-top:6px; margin-top:4px;">
+              <div>
+                <span>Payment Status:</span>
+                <div><span class="badge badge-paid">✓ PAID IN FULL</span></div>
+              </div>
+              <span style="font-size:16px; color:#34d399;">Remaining Due: ${fmt(currentBalance)}</span>
+            </div>
+          ` : mode === 'credit_sale' ? `
+            ${(details?.paid_amount || 0) > 0 ? `
+              <div class="baki-row">
+                <span>Paid Now / Down Payment:</span>
+                <span style="font-weight:800; color:#34d399;">${fmt(details?.paid_amount || 0)}</span>
+              </div>
+            ` : ''}
+            <div class="baki-row">
+              <span>New Purchase Due:</span>
+              <span style="font-weight:800; color:#f87171;">${fmt(details?.new_due_amount || txAmt)}</span>
+            </div>
+            <div class="baki-row" style="border-bottom:1px solid #334155; padding-bottom:6px;">
+              <span>Previous Due:</span>
+              <span style="font-weight:800;">${fmt(prevBalance)}</span>
+            </div>
+            <div class="baki-row" style="border-top:1px solid #334155; padding-top:8px; margin-top:6px; font-size:14px; font-weight:900;">
+              <span>Total Outstanding Due:</span>
+              <span style="font-size:18px; color:#f87171;">${fmt(currentBalance)}</span>
+            </div>
+          ` : `
+            <div class="baki-row" style="border-bottom:1px solid #334155; padding-bottom:6px;">
+              <span>Previous Due:</span>
+              <span style="font-weight:800; font-size:13px;">${fmt(prevBalance)}</span>
+            </div>
+            <div class="baki-row" style="margin-top:6px; color:#34d399;">
+              <span>Payment Received:</span>
+              <span style="font-weight:800;">-${fmt(txAmt)}</span>
+            </div>
+            <div class="baki-row" style="border-top:1px solid #334155; padding-top:8px; margin-top:6px; font-size:14px; font-weight:900;">
+              <div>
+                <span>Remaining Due:</span>
+                <div style="margin-top:2px;">
+                  ${isFullyPaid ? '<span class="badge badge-paid">✓ PAID / DUE CLEARED</span>' : '<span class="badge badge-due">⚠️ DUE REMAINING</span>'}
+                </div>
+              </div>
+              <span style="font-size:18px; color:${currentBalance > 0 ? '#f87171' : '#34d399'};">${fmt(currentBalance)}</span>
+            </div>
+          `}
         </div>
 
         ${noteText ? `<div style="font-style:italic; background:#f8fafc; padding:8px; border-radius:8px; font-size:11px; margin-bottom:16px;">📝 Note: ${noteText}</div>` : ''}

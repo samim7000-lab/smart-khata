@@ -61,6 +61,7 @@ export interface ReceiptItem {
 }
 
 export interface ReceiptDetailsPayload {
+  mode?: 'cash_sale' | 'credit_sale' | 'due_payment' | 'emi_plan';
   items?: ReceiptItem[];
   discount_type?: DiscountType;
   discount_value?: number;
@@ -69,6 +70,10 @@ export interface ReceiptDetailsPayload {
   taxable_amount?: number;
   gst_price_mode?: GstPriceMode;
   previous_balance?: number;
+  paid_amount?: number;
+  new_due_amount?: number;
+  payment_method?: string;
+  gst_enabled?: boolean;
   customer_address?: string;
   customer_gstin?: string;
   receipt_number?: string;

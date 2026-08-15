@@ -24,7 +24,7 @@ import {
 import { validatePhoneNumber } from '../lib/phoneValidation';
 import { getCountryByCode } from '../data/countries';
 import { printTransactionReceiptPDF } from '../lib/pdfGenerator';
-import { getWhatsAppUrl, formatWhatsAppNumber } from '../lib/whatsappUtils';
+import { getWhatsAppUrl } from '../lib/whatsappUtils';
 import { formatShopCurrency } from '../lib/countryPricing';
 import { unpackReceiptNote, calculatePreviousBalance } from '../lib/receiptUtils';
 
@@ -53,7 +53,6 @@ export const ReceiptModal: React.FC<Props> = ({
 
   const isCredit = transaction.type === 'credit_given';
   const isVoid = transaction.type === 'void_correction' || transaction.is_voided;
-  const typeLabel = isVoid ? t.void_correction : isCredit ? (language === 'bn' ? 'বাকি বিক্রি (Credit Given)' : 'Credit / Due Sale') : (language === 'bn' ? 'নগদ জমা (Payment Received)' : 'Payment Received');
   const fmt = (amt: number) => formatShopCurrency(amt, shop?.country, shop?.currency_code);
 
   const dateObj = new Date(transaction.created_at);
@@ -66,41 +65,68 @@ export const ReceiptModal: React.FC<Props> = ({
     { hour: '2-digit', minute: '2-digit' }
   );
 
-  // Unpack line items & discount payload if present
+  // Unpack line items & receipt payload details
   const { noteText, details } = unpackReceiptNote(transaction);
+  const mode = details?.mode || (isCredit ? 'credit_sale' : 'due_payment');
 
-  // Mathematical balance calculations (CRITICAL BAKI FIX: Previous Baki before this transaction)
+  // Dynamic Type Labels adhering strictly to Requirement #13 (Proper English Terminology)
+  let typeLabel = '';
+  if (language === 'bn') {
+    typeLabel = isVoid ? 'ভয়েড / সংশোধন' : mode === 'cash_sale' ? 'নগদ বিক্রি' : mode === 'credit_sale' ? 'বাকি বিক্রি' : 'বাকি আদায় / জমা';
+  } else {
+    typeLabel = isVoid ? 'Void / Correction' : mode === 'cash_sale' ? 'Cash Sale (Paid)' : mode === 'credit_sale' ? 'Credit Sale (Due)' : 'Payment Received';
+  }
+
+  // Mathematical balance calculations (CRITICAL BAKI FIX: Previous Due before this transaction)
   const prevBalance = calculatePreviousBalance(transaction, customer, transactions);
   const txAmt = Number(transaction.amount) || 0;
-  const currentBalance = isCredit ? prevBalance + txAmt : Math.max(0, prevBalance - txAmt);
+  
+  let currentBalance = 0;
+  if (mode === 'cash_sale') {
+    currentBalance = Math.max(0, prevBalance);
+  } else if (mode === 'credit_sale') {
+    const newDue = details?.new_due_amount !== undefined ? details.new_due_amount : txAmt;
+    currentBalance = prevBalance + newDue;
+  } else {
+    currentBalance = Math.max(0, prevBalance - txAmt);
+  }
+
   const isFullyPaid = currentBalance <= 0;
 
-  // Item List & Financial breakdown
-  const lineItems = details?.items && details.items.length > 0 ? details.items : [
-    {
+  // Item List (Only shown if mode is cash_sale or credit_sale and items exist)
+  const isPurePayment = mode === 'due_payment';
+  const hasItems = !isPurePayment && details?.items && details.items.length > 0;
+  const lineItems = hasItems ? details.items! : (
+    !isPurePayment ? [{
       id: 'default-item',
-      name: noteText || (isCredit ? 'Credit Transaction Item' : 'Payment Received'),
+      name: noteText || 'General Item Purchase',
       quantity: 1,
       unit_price: txAmt,
       total: txAmt,
-    }
-  ];
+    }] : []
+  );
 
   const subtotal = details?.subtotal !== undefined ? details.subtotal : txAmt;
   const discountAmt = details?.discount_amount || 0;
   const taxableAmt = details?.taxable_amount !== undefined ? details.taxable_amount : Math.max(0, subtotal - discountAmt);
-  const hasGst = shop.gst_enabled && transaction.tax_amount && transaction.tax_amount > 0;
+  
+  // Requirement #5 & #12: GST must be OPTIONAL. If disabled, do not render GST block!
+  const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && transaction.tax_amount && transaction.tax_amount > 0));
   const gstPriceMode = details?.gst_price_mode || transaction.gst_price_mode || 'exclusive';
 
   // Receipt / Invoice Number
   const receiptNumber = details?.receipt_number || `INV-${transaction.id.replace(/\D/g, '').slice(-6) || Date.now().toString().slice(-6)}`;
 
-  // Shop Address & Customer Address display formatting
+  // Shop Address & Customer Address display formatting (Omitted if empty - Requirement #12)
   const shopAddressStr = shop.full_address || [shop.city, shop.state, shop.postal_code].filter(Boolean).join(', ');
-  const customerAddressStr = details?.customer_address || customer.address || customer.state || '';
-  const customerGstinStr = details?.customer_gstin || customer.gstin || '';
+  const customerAddressStr = (details?.customer_address || customer.address || customer.state || '').trim();
+  const customerGstinStr = (details?.customer_gstin || customer.gstin || '').trim();
 
   // Formatted Text Receipt for Copy & WhatsApp text fallback
+  const labelPrevDue = language === 'bn' ? 'পূর্বের বাকি' : 'Previous Due';
+  const labelCurrentDue = language === 'bn' ? 'বর্তমান মোট বাকি' : 'Total Outstanding Due';
+  const labelPaymentRecv = language === 'bn' ? 'জমা পেয়েছেন' : 'Payment Received';
+
   const receiptText = `🧾 *${shop.shop_name.toUpperCase()}*
 ${shopAddressStr ? `Address: ${shopAddressStr}\n` : ''}${shop.owner_name ? `Owner: ${shop.owner_name}\n` : ''}${shop.phone ? `Phone: ${shop.phone}\n` : ''}${shop.gst_enabled && shop.gst_number ? `GSTIN: ${shop.gst_number}\n` : ''}----------------------------
 📄 *RECEIPT NO:* ${receiptNumber}
@@ -109,9 +135,8 @@ ${shopAddressStr ? `Address: ${shopAddressStr}\n` : ''}${shop.owner_name ? `Owne
 👤 *CUSTOMER:* ${customer.display_label || customer.name}
 📱 *Mobile:* ${customer.phone_number || 'N/A'}
 ${customerAddressStr ? `📍 *Address:* ${customerAddressStr}\n` : ''}${customerGstinStr ? `GSTIN: ${customerGstinStr}\n` : ''}----------------------------
-💰 *${t.total_with_tax}:* ${fmt(txAmt)} (${typeLabel})
-🔴 *Previous Baki:* ${fmt(prevBalance)}
-🔴 *Current Baki:* ${fmt(currentBalance)}
+💰 *${typeLabel.toUpperCase()}:* ${fmt(txAmt)}
+${prevBalance > 0 || isCredit ? `🔴 *${labelPrevDue}:* ${fmt(prevBalance)}\n` : ''}🔴 *${labelCurrentDue}:* ${fmt(currentBalance)}
 ----------------------------
 Thank you for your business! - ${shop.shop_name}`;
 
@@ -320,6 +345,8 @@ Thank you for your business! - ${shop.shop_name}`;
             <div className="space-y-1">
               <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Customer Details</div>
               <div className="font-black text-slate-900 text-sm">{customer.display_label || customer.name}</div>
+              
+              {/* Requirement #12: Omit address if empty */}
               {customerAddressStr && (
                 <div className="text-slate-600 font-medium flex items-start space-x-1">
                   <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
@@ -353,127 +380,192 @@ Thank you for your business! - ${shop.shop_name}`;
             </div>
           </div>
 
-          {/* ITEM DETAILS TABLE (| Item | Qty | Price | Amount |) */}
-          <div className="space-y-2">
-            <div className="text-xs font-black uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-1">
-              Itemized Invoice Summary
-            </div>
-
-            <table className="w-full text-xs text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-300 bg-slate-100 text-slate-700 font-black uppercase text-[10px]">
-                  <th className="py-2 px-2">Item Description</th>
-                  <th className="py-2 px-2 text-center">Qty</th>
-                  <th className="py-2 px-2 text-right">Unit Price</th>
-                  <th className="py-2 px-2 text-right">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                {lineItems.map((item, idx) => (
-                  <tr key={item.id || idx}>
-                    <td className="py-2 px-2 font-bold">{item.name}</td>
-                    <td className="py-2 px-2 text-center text-slate-600">{item.quantity}</td>
-                    <td className="py-2 px-2 text-right text-slate-600">{fmt(item.unit_price)}</td>
-                    <td className="py-2 px-2 text-right font-bold text-slate-900">{fmt(item.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* FINANCIAL BREAKDOWN: Subtotal, Discount, Taxable Amount, GST, Grand Total */}
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1.5 text-xs">
-            <div className="flex justify-between text-slate-600 font-medium">
-              <span>Subtotal:</span>
-              <span className="font-bold text-slate-900">{fmt(subtotal)}</span>
-            </div>
-
-            {discountAmt > 0 && (
-              <div className="flex justify-between text-emerald-700 font-extrabold">
-                <span>Discount ({details?.discount_type === 'percentage' ? `${details.discount_value}%` : 'Fixed'}):</span>
-                <span>-{fmt(discountAmt)}</span>
+          {/* ITEM DETAILS TABLE (Only rendered if NOT pure payment received!) */}
+          {!isPurePayment && lineItems.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-black uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-1">
+                Itemized Invoice Summary
               </div>
-            )}
 
-            {hasGst && (
-              <>
-                <div className="flex justify-between text-slate-700 font-semibold pt-1 border-t border-slate-200/60">
-                  <span>Taxable Amount:</span>
-                  <span className="font-bold">{fmt(taxableAmt)}</span>
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-300 bg-slate-100 text-slate-700 font-black uppercase text-[10px]">
+                    <th className="py-2 px-2">Item Description</th>
+                    <th className="py-2 px-2 text-center">Qty</th>
+                    <th className="py-2 px-2 text-right">Unit Price</th>
+                    <th className="py-2 px-2 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                  {lineItems.map((item, idx) => (
+                    <tr key={item.id || idx}>
+                      <td className="py-2 px-2 font-bold">{item.name}</td>
+                      <td className="py-2 px-2 text-center text-slate-600">{item.quantity}</td>
+                      <td className="py-2 px-2 text-right text-slate-600">{fmt(item.unit_price)}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-900">{fmt(item.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* FINANCIAL BREAKDOWN (For Sale Transactions) */}
+          {!isPurePayment && (
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1.5 text-xs">
+              <div className="flex justify-between text-slate-600 font-medium">
+                <span>Subtotal:</span>
+                <span className="font-bold text-slate-900">{fmt(subtotal)}</span>
+              </div>
+
+              {/* Requirement #12: Omit discount if 0 */}
+              {discountAmt > 0 && (
+                <div className="flex justify-between text-emerald-700 font-extrabold">
+                  <span>Discount ({details?.discount_type === 'percentage' ? `${details.discount_value}%` : 'Fixed'}):</span>
+                  <span>-{fmt(discountAmt)}</span>
                 </div>
+              )}
 
-                <div className="bg-blue-50/70 p-2.5 rounded-xl space-y-1 text-slate-700 border border-blue-100 text-[11px] font-semibold">
-                  <div className="flex justify-between text-blue-900 font-extrabold text-[10px] uppercase">
-                    <span>GST Mode: {gstPriceMode === 'inclusive' ? 'Price Includes GST' : 'GST Added to Price'}</span>
-                    <span>Rate: {transaction.gst_rate}%</span>
+              {/* Requirement #5 & #12: Omit GST section if GST disabled */}
+              {hasGst && (
+                <>
+                  <div className="flex justify-between text-slate-700 font-semibold pt-1 border-t border-slate-200/60">
+                    <span>Taxable Base Amount:</span>
+                    <span className="font-bold">{fmt(taxableAmt)}</span>
                   </div>
 
-                  {(transaction.cgst_amount || 0) > 0 && (
-                    <div className="flex justify-between">
-                      <span>CGST ({(transaction.gst_rate || 0) / 2}%):</span>
-                      <span>+{fmt(transaction.cgst_amount || 0)}</span>
+                  <div className="bg-blue-50/70 p-2.5 rounded-xl space-y-1 text-slate-700 border border-blue-100 text-[11px] font-semibold">
+                    <div className="flex justify-between text-blue-900 font-extrabold text-[10px] uppercase">
+                      <span>GST Mode: {gstPriceMode === 'inclusive' ? 'Price Includes GST' : 'GST Added to Price'}</span>
+                      <span>Rate: {transaction.gst_rate || 18}%</span>
                     </div>
-                  )}
-                  {(transaction.sgst_amount || 0) > 0 && (
-                    <div className="flex justify-between">
-                      <span>SGST ({(transaction.gst_rate || 0) / 2}%):</span>
-                      <span>+{fmt(transaction.sgst_amount || 0)}</span>
+
+                    {(transaction.cgst_amount || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>CGST ({(transaction.gst_rate || 0) / 2}%):</span>
+                        <span>+{fmt(transaction.cgst_amount || 0)}</span>
+                      </div>
+                    )}
+                    {(transaction.sgst_amount || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>SGST ({(transaction.gst_rate || 0) / 2}%):</span>
+                        <span>+{fmt(transaction.sgst_amount || 0)}</span>
+                      </div>
+                    )}
+                    {(transaction.igst_amount || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>IGST ({transaction.gst_rate}%):</span>
+                        <span>+{fmt(transaction.igst_amount || 0)}</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-between items-center pt-2 border-t border-slate-300">
+                <div>
+                  <span className="font-black text-sm text-slate-900 uppercase">Grand Total:</span>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">{typeLabel}</div>
+                </div>
+                <span className={`text-2xl font-black ${mode === 'credit_sale' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {fmt(txAmt)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* LEDGER & BAKI BALANCE BREAKDOWN BLOCK (REQUIREMENT #6, #7, #8, #9, #13) */}
+          <div className="bg-slate-900 text-white p-4 rounded-2xl space-y-2 text-xs">
+            
+            {/* Cash Sale Layout */}
+            {mode === 'cash_sale' && (
+              <>
+                <div className="flex justify-between items-center text-slate-300 font-medium">
+                  <span>Payment Amount:</span>
+                  <span className="font-black text-emerald-400">{fmt(txAmt)}</span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+                  <div>
+                    <span className="font-black text-white text-sm">Payment Status:</span>
+                    <div className="mt-0.5">
+                      <span className="bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black text-[10px] uppercase">
+                        ✓ PAID IN FULL
+                      </span>
                     </div>
-                  )}
-                  {(transaction.igst_amount || 0) > 0 && (
-                    <div className="flex justify-between">
-                      <span>IGST ({transaction.gst_rate}%):</span>
-                      <span>+{fmt(transaction.igst_amount || 0)}</span>
-                    </div>
-                  )}
+                  </div>
+                  <span className="text-xl font-black text-emerald-400">
+                    Remaining Due: {fmt(currentBalance)}
+                  </span>
                 </div>
               </>
             )}
 
-            <div className="flex justify-between items-center pt-2 border-t border-slate-300">
-              <div>
-                <span className="font-black text-sm text-slate-900 uppercase">Grand Total:</span>
-                <div className="text-[10px] text-slate-400 font-bold uppercase">{typeLabel}</div>
-              </div>
-              <span className={`text-2xl font-black ${isCredit ? 'text-rose-600' : 'text-emerald-600'}`}>
-                {fmt(txAmt)}
-              </span>
-            </div>
-          </div>
+            {/* Credit Sale Layout */}
+            {mode === 'credit_sale' && (
+              <>
+                {details?.paid_amount && details.paid_amount > 0 ? (
+                  <div className="flex justify-between items-center text-slate-300 font-medium">
+                    <span>Paid Now / Down Payment:</span>
+                    <span className="font-black text-emerald-400">{fmt(details.paid_amount)}</span>
+                  </div>
+                ) : null}
 
-          {/* LEDGER & BAKI BALANCE BREAKDOWN BLOCK (REQUIREMENT #12, #13, #14, #15 FIX) */}
-          <div className="bg-slate-900 text-white p-4 rounded-2xl space-y-2 text-xs">
-            <div className="flex justify-between items-center text-slate-400 font-semibold pb-1 border-b border-slate-800">
-              <span>Previous Baki (Balance before this tx):</span>
-              <span className="font-black text-slate-200 text-sm">{fmt(prevBalance)}</span>
-            </div>
-
-            <div className="flex justify-between items-center text-slate-300 font-medium">
-              <span>Current Transaction Amount:</span>
-              <span className={`font-black ${isCredit ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {isCredit ? '+' : '-'}{fmt(txAmt)}
-              </span>
-            </div>
-
-            <div className="flex justify-between items-center pt-2 border-t border-slate-800">
-              <div>
-                <span className="font-black text-white text-sm">Current Outstanding Baki:</span>
-                <div className="text-[10px] font-extrabold uppercase mt-0.5">
-                  {isFullyPaid ? (
-                    <span className="bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black">
-                      ✓ FULLY PAID / CLEAR
-                    </span>
-                  ) : (
-                    <span className="bg-rose-500 text-white px-2 py-0.5 rounded font-black">
-                      ⚠️ DUE BALANCE
-                    </span>
-                  )}
+                <div className="flex justify-between items-center text-slate-300 font-medium">
+                  <span>New Purchase Due:</span>
+                  <span className="font-black text-rose-400">{fmt(details?.new_due_amount || txAmt)}</span>
                 </div>
-              </div>
-              <span className={`text-2xl font-black ${currentBalance > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {fmt(currentBalance)}
-              </span>
-            </div>
+
+                {/* Requirement #6: Show Previous Due (0 if first transaction) */}
+                <div className="flex justify-between items-center text-slate-400 font-semibold pb-1 border-b border-slate-800">
+                  <span>Previous Due:</span>
+                  <span className="font-black text-slate-200 text-sm">{fmt(prevBalance)}</span>
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+                  <div>
+                    <span className="font-black text-white text-sm">Total Outstanding Due:</span>
+                  </div>
+                  <span className="text-2xl font-black text-rose-400">
+                    {fmt(currentBalance)}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {/* Payment Received / Due Clearance Layout */}
+            {mode === 'due_payment' && (
+              <>
+                <div className="flex justify-between items-center text-slate-400 font-semibold pb-1 border-b border-slate-800">
+                  <span>Previous Due:</span>
+                  <span className="font-black text-slate-200 text-sm">{fmt(prevBalance)}</span>
+                </div>
+
+                <div className="flex justify-between items-center text-emerald-400 font-extrabold">
+                  <span>Payment Received:</span>
+                  <span className="font-black text-emerald-400">-{fmt(txAmt)}</span>
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+                  <div>
+                    <span className="font-black text-white text-sm">Remaining Due:</span>
+                    <div className="text-[10px] font-extrabold uppercase mt-0.5">
+                      {isFullyPaid ? (
+                        <span className="bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black">
+                          ✓ PAID / DUE CLEARED
+                        </span>
+                      ) : (
+                        <span className="bg-rose-500 text-white px-2 py-0.5 rounded font-black">
+                          ⚠️ DUE REMAINING
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span className={`text-2xl font-black ${currentBalance > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {fmt(currentBalance)}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* NOTE BLOCK */}
@@ -483,7 +575,7 @@ Thank you for your business! - ${shop.shop_name}`;
             </div>
           )}
 
-          {/* FOOTER & AUTHORIZED SIGNATURE (REQUIREMENT #16) */}
+          {/* FOOTER & AUTHORIZED SIGNATURE (REQUIREMENT #16 & #17) */}
           <div className="flex items-end justify-between pt-3 border-t border-slate-200">
             <div className="space-y-1">
               <div className="flex items-center text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">
@@ -527,9 +619,6 @@ Thank you for your business! - ${shop.shop_name}`;
               </>
             )}
           </button>
-          <p className="text-[10px] text-slate-400 font-medium text-center leading-tight">
-            💡 Opens WhatsApp with normalized phone number & prefilled receipt link.
-          </p>
 
           {/* Multi Control Action Grid */}
           <div className="grid grid-cols-4 gap-1.5 pt-1">
