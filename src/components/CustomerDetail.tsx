@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 
 import { formatShopCurrency } from '../lib/countryPricing';
+import { unpackReceiptNote } from '../lib/receiptUtils';
 import { printCustomerStatementPDF } from '../lib/pdfGenerator';
 
 interface Props {
@@ -165,26 +166,32 @@ export const CustomerDetail: React.FC<Props> = ({
             <div className="space-y-3">
               {transactions.map((tx) => {
                 const isCredit = tx.type === 'credit_given';
+                const { noteText, details } = unpackReceiptNote(tx);
                 return (
                   <div
                     key={tx.id}
-                    className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-2 hover:bg-slate-100/80 transition-colors min-w-0"
+                    className="p-3.5 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between space-x-2"
                   >
-                    <div className="space-y-1 min-w-0 flex-1 pr-1">
-                      <div className="flex items-center space-x-2 min-w-0">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex items-center space-x-2">
                         <span
                           className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
                             isCredit ? 'bg-red-600' : 'bg-green-600'
                           }`}
                         />
-                        <span className="font-extrabold text-xs sm:text-sm text-slate-900 truncate">
+                        <span className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-slate-100 truncate">
                           {isCredit ? t.credit_given : t.payment_received}
                         </span>
+                        {details?.payment_method && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800 shrink-0">
+                            💳 {details.payment_method}
+                          </span>
+                        )}
                       </div>
 
-                      {tx.note && (
-                        <div className="text-xs text-slate-600 font-medium pl-4 truncate">
-                          📝 {tx.note}
+                      {noteText && (
+                        <div className="text-xs text-slate-600 dark:text-slate-300 font-medium pl-4 truncate">
+                          📝 {noteText}
                         </div>
                       )}
 

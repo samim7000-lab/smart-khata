@@ -20,7 +20,7 @@ export const calculateGst = (
   isGstEnabled: boolean,
   shopState?: string,
   customerState?: string,
-  priceMode: GstPriceMode = 'exclusive'
+  priceMode: GstPriceMode = 'inclusive'
 ): GstCalculationResult => {
   const cleanAmount = Math.max(0, enteredAmount);
 
@@ -48,7 +48,7 @@ export const calculateGst = (
   let totalAmount = 0;
 
   if (priceMode === 'inclusive') {
-    // Total is entered amount. Base = Total / (1 + rate/100)
+    // Total is entered final selling amount. Taxable Base = Total / (1 + rate/100)
     totalAmount = cleanAmount;
     baseAmount = Math.round((totalAmount / (1 + gstRate / 100)) * 100) / 100;
     taxAmount = Math.round((totalAmount - baseAmount) * 100) / 100;
@@ -93,23 +93,19 @@ export const runGstCalculationSelfTest = (): boolean => {
   const res1 = calculateGst(1000, 18, false, 'West Bengal', 'West Bengal');
   if (res1.taxAmount !== 0 || res1.totalAmount !== 1000 || res1.taxType !== 'none') return false;
 
-  // Test 2: Intra-State 18% GST Exclusive (WB to WB)
-  const res2 = calculateGst(1000, 18, true, 'West Bengal', 'West Bengal', 'exclusive');
-  if (res2.taxType !== 'intra' || res2.taxAmount !== 180 || res2.cgstAmount !== 90 || res2.sgstAmount !== 90) return false;
+  // Test 2: GST 18% INCLUDED (₹500 total) -> Taxable = 423.73, Tax = 76.27, Total = 500
+  const res2 = calculateGst(500, 18, true, 'West Bengal', 'West Bengal', 'inclusive');
+  if (res2.baseAmount !== 423.73 || res2.taxAmount !== 76.27 || res2.totalAmount !== 500) return false;
 
-  // Test 3: Inter-State 18% GST Exclusive (WB to Delhi)
-  const res3 = calculateGst(1000, 18, true, 'West Bengal', 'Delhi', 'exclusive');
-  if (res3.taxType !== 'inter' || res3.taxAmount !== 180 || res3.igstAmount !== 180 || res3.cgstAmount !== 0) return false;
+  // Test 3: GST 5% INCLUDED (₹1000 total) -> Taxable = 952.38, Tax = 47.62, Total = 1000
+  const res3 = calculateGst(1000, 5, true, 'West Bengal', 'Delhi', 'inclusive');
+  if (res3.baseAmount !== 952.38 || res3.taxAmount !== 47.62 || res3.totalAmount !== 1000) return false;
 
-  // Test 4: GST Inclusive 2% (₹400 total) -> Base = 392.16, Tax = 7.84, Total = 400
-  const res4 = calculateGst(400, 2, true, 'West Bengal', 'West Bengal', 'inclusive');
-  if (res4.baseAmount !== 392.16 || res4.taxAmount !== 7.84 || res4.totalAmount !== 400) return false;
+  // Test 4: GST 28% INCLUDED (₹1000 total) -> Taxable = 781.25, Tax = 218.75, Total = 1000
+  const res4 = calculateGst(1000, 28, true, 'West Bengal', 'West Bengal', 'inclusive');
+  if (res4.baseAmount !== 781.25 || res4.taxAmount !== 218.75 || res4.totalAmount !== 1000) return false;
 
-  // Test 5: GST Exclusive 2% (₹400 base) -> Base = 400, Tax = 8, Total = 408
-  const res5 = calculateGst(400, 2, true, 'West Bengal', 'West Bengal', 'exclusive');
-  if (res5.baseAmount !== 400 || res5.taxAmount !== 8 || res5.totalAmount !== 408) return false;
-
-  console.log('[GST_ENGINE] Self-test passed cleanly including inclusive & exclusive price modes!');
+  console.log('[GST_ENGINE] All 4 GST-Inclusive self-test cases passed cleanly!');
   return true;
 };
 

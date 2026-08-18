@@ -6,7 +6,7 @@ import { formatShopCurrency } from './countryPricing';
  */
 export function packReceiptNote(userNote: string, details?: ReceiptDetailsPayload): string {
   const cleanNote = userNote.trim();
-  if (!details || (!details.items?.length && !details.discount_amount && details.gst_price_mode === 'exclusive' && !details.customer_address && !details.customer_gstin)) {
+  if (!details) {
     return cleanNote;
   }
   const jsonStr = JSON.stringify(details);

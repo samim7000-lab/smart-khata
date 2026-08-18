@@ -377,6 +377,14 @@ Thank you for your business! - ${shop.shop_name}`;
                 <div className="font-semibold text-slate-700">{dateFormatted}</div>
                 <div className="text-[11px] text-slate-500">{timeFormatted}</div>
               </div>
+              {details?.payment_method && (
+                <div className="pt-1">
+                  <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Payment Method</div>
+                  <div className="font-extrabold text-blue-700 text-xs bg-blue-50 px-2 py-0.5 rounded border border-blue-200 inline-block mt-0.5">
+                    💳 {details.payment_method}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

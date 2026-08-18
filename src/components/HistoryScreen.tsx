@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 import { formatShopCurrency } from '../lib/countryPricing';
+import { unpackReceiptNote } from '../lib/receiptUtils';
 
 interface Props {
   transactions: Transaction[];
@@ -239,26 +240,32 @@ export const HistoryScreen: React.FC<Props> = ({
             const cust = getCustomer(tx.customer_id);
             const isCredit = tx.type === 'credit_given';
             const isVoid = tx.type === 'void_correction' || tx.is_voided;
+            const { noteText, details } = unpackReceiptNote(tx);
 
             return (
               <div
                 key={tx.id}
-                className={`p-4 rounded-3xl border-2 transition-all bg-white shadow-sm space-y-3 ${
+                className={`p-4 rounded-3xl border-2 transition-all bg-white dark:bg-slate-800 shadow-sm space-y-3 ${
                   isVoid
-                    ? 'border-slate-200 bg-slate-50/70 opacity-80'
+                    ? 'border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/60 opacity-80'
                     : isCredit
-                    ? 'border-red-100 hover:border-red-200'
-                    : 'border-green-100 hover:border-green-200'
+                    ? 'border-red-100 dark:border-red-900/60 hover:border-red-200'
+                    : 'border-green-100 dark:border-green-900/60 hover:border-green-200'
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="space-y-1 min-w-0 flex-1 pr-1">
-                    <div className="font-extrabold text-slate-900 text-sm sm:text-base flex items-center space-x-2 flex-wrap gap-y-1">
+                    <div className="font-extrabold text-slate-900 dark:text-slate-100 text-sm sm:text-base flex items-center space-x-2 flex-wrap gap-y-1">
                       <span className="truncate max-w-[180px] sm:max-w-none">{cust?.display_label || 'Unknown Customer'}</span>
                       {isVoid && <span className="badge-void shrink-0">{t.void_correction}</span>}
+                      {details?.payment_method && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800 shrink-0">
+                          💳 {details.payment_method}
+                        </span>
+                      )}
                     </div>
 
-                    <div className="text-xs text-slate-500 font-medium flex items-center space-x-2 flex-wrap text-[11px]">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-medium flex items-center space-x-2 flex-wrap text-[11px]">
                       <span>{cust?.phone_number}</span>
                       <span>•</span>
                       <span className="flex items-center">
@@ -272,10 +279,10 @@ export const HistoryScreen: React.FC<Props> = ({
                     <div
                       className={`text-lg sm:text-xl font-black ${
                         isVoid
-                          ? 'text-slate-500 line-through'
+                          ? 'text-slate-500 dark:text-slate-400 line-through'
                           : isCredit
-                          ? 'text-red-600'
-                          : 'text-green-600'
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-green-600 dark:text-green-400'
                       }`}
                     >
                       {isVoid ? '' : isCredit ? '-' : '+'}{formatShopCurrency(Number(tx.amount), shop?.country, shop?.currency_code)}
@@ -284,9 +291,9 @@ export const HistoryScreen: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {tx.note && (
-                  <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200 italic font-medium">
-                    📝 {tx.note}
+                {noteText && (
+                  <div className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 italic font-medium">
+                    📝 {noteText}
                   </div>
                 )}
 
