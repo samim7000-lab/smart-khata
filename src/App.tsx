@@ -930,11 +930,22 @@ export const App: React.FC = () => {
             .select()
             .single();
 
-          if (error && (error.message?.includes('schema cache') || error.code === 'PGRST204')) {
-            delete txPayload.ledger_photo_url;
+          if (error && (error.message?.includes('schema cache') || error.message?.includes('column') || error.code === 'PGRST204')) {
+            console.warn('[DB-RETRY] Retrying transaction insertion with core schema payload...', error.message);
+            const corePayload: any = {
+              shop_id: activeShop.id,
+              customer_id: finalCustId,
+              type,
+              amount,
+              note: packedNote,
+            };
+            if (ledgerPhotoUrl && ledgerPhotoUrl.trim()) {
+              corePayload.ledger_photo_url = ledgerPhotoUrl.trim();
+            }
+
             const retryResult = await supabase
               .from('transactions')
-              .insert(txPayload)
+              .insert(corePayload)
               .select()
               .single();
 
@@ -948,7 +959,7 @@ export const App: React.FC = () => {
           savedTx = { ...data, receipt_details: receiptDetails };
         } catch (err: any) {
           console.error('[UUID-GUARD] Supabase transaction insert error:', err);
-          alert('Failed to save transaction: ' + err.message);
+          alert('Failed to save transaction: ' + (err.message || 'Unknown database error'));
           return;
         }
       } else {

@@ -105,12 +105,12 @@ export const AddTransactionModal: React.FC<Props> = ({
   const [discountType, setDiscountType] = useState<DiscountType>('fixed');
   const [discountValStr, setDiscountValStr] = useState('');
 
-  // Optional GST Toggle & Price Mode State (Requirement #3, #4: Defaults to INCLUSIVE)
+  // Optional GST Toggle & Price Mode State (Defaults to INCLUSIVE)
   const [isGstEnabled, setIsGstEnabled] = useState<boolean>(false);
   const [gstRate, setGstRate] = useState<number>(shop.default_gst_rate || 18);
   const [gstPriceMode, setGstPriceMode] = useState<GstPriceMode>('inclusive');
 
-  // Payment Details & Method State (Requirement #2: Functional Payment Method Buttons)
+  // Payment Details & Method State
   const [amountStr, setAmountStr] = useState('');
   const [paidNowStr, setPaidNowStr] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<string>('Cash');
@@ -144,7 +144,7 @@ export const AddTransactionModal: React.FC<Props> = ({
       c.display_label.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // AUTO-FILL PREVIOUSLY SAVED CUSTOMER DETAILS ON SELECTION (Requirement #15)
+  // AUTO-FILL PREVIOUSLY SAVED CUSTOMER DETAILS ON SELECTION
   const handleSelectCustomer = (c: Customer) => {
     setSelectedCustomer(c);
     setCustomerState(c.state || '');
@@ -162,7 +162,7 @@ export const AddTransactionModal: React.FC<Props> = ({
       const countryConfig = getCountryByCode(shop.country || 'IN');
       const phoneVal = validatePhoneNumber(newPhone.trim(), countryConfig, language);
       if (!phoneVal.isValid) {
-        alert(phoneVal.errorMsg || (language === 'bn' ? 'সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.'));
+        alert(phoneVal.errorMsg || t.invalid_phone_error);
         return;
       }
     }
@@ -242,7 +242,7 @@ export const AddTransactionModal: React.FC<Props> = ({
   // Final selling price after discount
   const finalSellingPrice = Math.max(0, rawSubtotal - discountAmount);
 
-  // Requirement #3 & #4: GST-Inclusive Calculation (Taxable Base = Final Price / (1 + Rate/100))
+  // GST-Inclusive Calculation Engine
   const gstCalc = calculateGst(
     finalSellingPrice,
     gstRate,
@@ -289,7 +289,7 @@ export const AddTransactionModal: React.FC<Props> = ({
       const countryConfig = getCountryByCode(shop.country || 'IN');
       const phoneVal = validatePhoneNumber(selectedCustomer.phone_number.trim(), countryConfig, language);
       if (!phoneVal.isValid) {
-        alert(phoneVal.errorMsg || (language === 'bn' ? 'সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.'));
+        alert(phoneVal.errorMsg || t.invalid_phone_error);
         return;
       }
     }
@@ -350,12 +350,12 @@ export const AddTransactionModal: React.FC<Props> = ({
     : currentStep;
 
   const stepTitles = {
-    1: 'Step 1: Select Customer',
-    2: 'Step 2: Transaction Type',
-    3: 'Step 3: Item & Price',
-    4: 'Step 4: Discount & GST',
-    5: 'Step 5: Payment & Due Summary',
-    6: 'Step 6: Review & Confirm',
+    1: t.step_title_1,
+    2: t.step_title_2,
+    3: t.step_title_3,
+    4: t.step_title_4,
+    5: t.step_title_5,
+    6: t.step_title_6,
   };
 
   const PAYMENT_METHODS = [
@@ -389,8 +389,8 @@ export const AddTransactionModal: React.FC<Props> = ({
           {/* Clean Step Indicator Tracker Bar */}
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] font-black uppercase text-slate-400">
-              <span>Progress</span>
-              <span>Step {currentStepDisplay} of {totalSteps}</span>
+              <span>{t.progress}</span>
+              <span>{t.step_x_of_y.replace('{current}', String(currentStepDisplay)).replace('{total}', String(totalSteps))}</span>
             </div>
             <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden flex">
               <div
@@ -413,14 +413,14 @@ export const AddTransactionModal: React.FC<Props> = ({
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="font-extrabold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider">
-                      Select Customer <span className="text-rose-500">*</span>
+                      {t.select_customer} <span className="text-rose-500">*</span>
                     </h4>
                     <button
                       onClick={() => setIsAddingNewCustomer(true)}
                       className="inline-flex items-center text-xs font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/80 px-3 py-1.5 rounded-xl border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition-colors"
                     >
                       <UserPlus className="w-4 h-4 mr-1" />
-                      + Add New Customer
+                      + {t.add_customer}
                     </button>
                   </div>
 
@@ -430,7 +430,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search customer name or mobile..."
+                      placeholder={t.search_placeholder}
                       className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-400 rounded-xl font-bold border border-slate-300 dark:border-slate-600 focus:border-blue-600 outline-none text-xs"
                     />
                   </div>
@@ -454,7 +454,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                               (c.balance || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
                             }`}
                           >
-                            {(c.balance || 0) > 0 ? `Due: ${formatShopCurrency(c.balance, shop?.country, shop?.currency_code)}` : '✓ Clear'}
+                            {(c.balance || 0) > 0 ? `${t.owe_money}: ${formatShopCurrency(c.balance, shop?.country, shop?.currency_code)}` : `✓ ${t.paid_up}`}
                           </div>
                         </div>
                       </button>
@@ -466,27 +466,27 @@ export const AddTransactionModal: React.FC<Props> = ({
                 <form onSubmit={handleCreateNewCustomerSubmit} className="space-y-3 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center justify-between">
                     <h4 className="font-extrabold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider">
-                      New Customer Info
+                      {t.add_customer}
                     </h4>
                     <button
                       type="button"
                       onClick={() => setIsAddingNewCustomer(false)}
                       className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
                     >
-                      Back to Search
+                      {t.back_to_search}
                     </button>
                   </div>
 
                   <div>
                     <label className="block text-xs font-extrabold text-slate-800 dark:text-slate-200 mb-1">
-                      Customer Name <span className="text-rose-500">*</span>
+                      {t.customer_name} <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
                       required
                       value={newName}
                       onChange={(e) => handleNameChange(e.target.value)}
-                      placeholder="e.g. Samim Gayen"
+                      placeholder={t.name_placeholder}
                       className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-slate-300 dark:border-slate-600 font-bold text-sm outline-none"
                     />
                   </div>
@@ -500,7 +500,7 @@ export const AddTransactionModal: React.FC<Props> = ({
 
                   <div>
                     <label className="block text-xs font-extrabold text-slate-800 dark:text-slate-200 mb-1">
-                      Mobile Number <span className="text-rose-500">*</span>
+                      {t.customer_phone} <span className="text-rose-500">*</span>
                     </label>
                     <CountryPhoneInput
                       language={language}
@@ -516,14 +516,14 @@ export const AddTransactionModal: React.FC<Props> = ({
                       onClick={() => setShowAdvancedDetails(!showAdvancedDetails)}
                       className="text-xs font-extrabold text-blue-600 dark:text-blue-400 flex items-center space-x-1"
                     >
-                      <span>{showAdvancedDetails ? 'Hide Optional Fields ▲' : 'More Details (Address/GSTIN) ▼'}</span>
+                      <span>{showAdvancedDetails ? t.hide_optional_fields : t.more_details_toggle}</span>
                     </button>
 
                     {showAdvancedDetails && (
                       <div className="space-y-2.5 pt-2 animate-in fade-in">
                         <div>
                           <label className="block text-xs font-extrabold text-slate-800 dark:text-slate-200 mb-1">
-                            Customer Address (Optional)
+                            {t.full_address} ({t.email_optional.split(' ')[1] || 'Optional'})
                           </label>
                           <input
                             type="text"
@@ -537,13 +537,13 @@ export const AddTransactionModal: React.FC<Props> = ({
                         {shop.gst_enabled && (
                           <div>
                             <label className="block text-xs font-extrabold text-slate-800 dark:text-slate-200 mb-1">
-                              GSTIN (Optional)
+                              {t.gst_number}
                             </label>
                             <input
                               type="text"
                               value={customerGstin}
                               onChange={(e) => setCustomerGstin(e.target.value)}
-                              placeholder="e.g. 19ABCDE1234F1Z5"
+                              placeholder={t.gst_placeholder}
                               className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-mono font-bold outline-none"
                             />
                           </div>
@@ -556,7 +556,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                     type="submit"
                     className="w-full py-3 bg-blue-600 text-white font-black rounded-xl text-xs shadow-md hover:bg-blue-700 transition-all flex items-center justify-center space-x-1.5"
                   >
-                    <span>Save & Continue</span>
+                    <span>{t.save_continue}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </form>
@@ -571,7 +571,7 @@ export const AddTransactionModal: React.FC<Props> = ({
             <div className="space-y-4">
               <div className="bg-slate-100 dark:bg-slate-800 p-3.5 rounded-2xl flex items-center justify-between border border-slate-200 dark:border-slate-700">
                 <div>
-                  <div className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">Customer</div>
+                  <div className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.receipt_customer}</div>
                   <div className="font-black text-slate-900 dark:text-slate-100 text-sm">{selectedCustomer.display_label}</div>
                   <div className="text-[11px] text-slate-600 dark:text-slate-400 font-bold">{selectedCustomer.phone_number}</div>
                 </div>
@@ -581,14 +581,14 @@ export const AddTransactionModal: React.FC<Props> = ({
                     onClick={() => setCurrentStep(1)}
                     className="text-xs font-extrabold text-blue-600 dark:text-blue-400 hover:underline"
                   >
-                    Change
+                    {t.change_lang === 'Language' ? 'Change' : 'পরিবর্তন'}
                   </button>
                 )}
               </div>
 
               <div className="space-y-2">
                 <label className="block text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                  Select Transaction Type <span className="text-rose-500">*</span>
+                  {t.tx_type_filter} <span className="text-rose-500">*</span>
                 </label>
 
                 {/* Large Cards with High Contrast Selected States */}
@@ -611,9 +611,9 @@ export const AddTransactionModal: React.FC<Props> = ({
                       </div>
                       <div>
                         <div className="font-black text-base text-slate-900 dark:text-slate-100 group-hover:text-emerald-600">
-                          Cash Sale (Fully Paid)
+                          {t.cash_sale_title}
                         </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">Customer pays full amount immediately</div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">{t.cash_sale_sub}</div>
                       </div>
                     </div>
                     <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 shrink-0" />
@@ -637,9 +637,9 @@ export const AddTransactionModal: React.FC<Props> = ({
                       </div>
                       <div>
                         <div className="font-black text-base text-slate-900 dark:text-slate-100 group-hover:text-rose-600">
-                          Due Sale (Buy Now, Pay Later)
+                          {t.credit_sale_title}
                         </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">Customer buys on credit with optional down payment</div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">{t.credit_sale_sub}</div>
                       </div>
                     </div>
                     <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-rose-600 shrink-0" />
@@ -663,9 +663,9 @@ export const AddTransactionModal: React.FC<Props> = ({
                       </div>
                       <div>
                         <div className="font-black text-base text-slate-900 dark:text-slate-100 group-hover:text-blue-600">
-                          Payment Received (Clear Due)
+                          {t.due_payment_title}
                         </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">Customer pays existing outstanding due balance</div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">{t.due_payment_sub}</div>
                       </div>
                     </div>
                     <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-blue-600 shrink-0" />
@@ -688,9 +688,9 @@ export const AddTransactionModal: React.FC<Props> = ({
                       </div>
                       <div>
                         <div className="font-black text-base text-slate-900 dark:text-slate-100 group-hover:text-purple-600">
-                          EMI Installment Plan
+                          {t.emi_plan_title}
                         </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">Set up custom monthly EMI financing schedule</div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">{t.emi_plan_sub}</div>
                       </div>
                     </div>
                     <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-purple-600 shrink-0" />
@@ -747,7 +747,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-black text-slate-900 dark:text-slate-100 flex items-center">
                     <ShoppingBag className="w-4 h-4 mr-1 text-blue-600 dark:text-blue-400" />
-                    <span>Product / Item Breakdown</span>
+                    <span>{t.product_breakdown}</span>
                   </span>
                   <span className="text-[10px] bg-blue-100 dark:bg-blue-900/60 text-blue-900 dark:text-blue-200 px-2 py-0.5 rounded-md font-black border border-blue-200 dark:border-blue-800">
                     {items.length} {items.length === 1 ? 'item' : 'items'}
@@ -786,11 +786,11 @@ export const AddTransactionModal: React.FC<Props> = ({
                 <div className="space-y-2 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
                   <div>
                     <label className="block text-[11px] font-black text-slate-800 dark:text-slate-200 mb-1">
-                      Product / Item Name <span className="text-rose-500">*</span>
+                      {t.product_name_label} <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Medicine A"
+                      placeholder={t.product_name_placeholder}
                       value={itemNameInput}
                       onChange={(e) => setItemNameInput(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl text-xs font-bold outline-none"
@@ -800,7 +800,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-[11px] font-black text-slate-800 dark:text-slate-200 mb-1">
-                        Quantity <span className="text-rose-500">*</span>
+                        {t.quantity_label} <span className="text-rose-500">*</span>
                       </label>
                       <input
                         type="number"
@@ -814,7 +814,7 @@ export const AddTransactionModal: React.FC<Props> = ({
 
                     <div>
                       <label className="block text-[11px] font-black text-slate-800 dark:text-slate-200 mb-1">
-                        Selling Price (GST-Incl) <span className="text-rose-500">*</span>
+                        {t.unit_price_label} <span className="text-rose-500">*</span>
                       </label>
                       <input
                         type="number"
@@ -833,13 +833,13 @@ export const AddTransactionModal: React.FC<Props> = ({
                     className="w-full py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/80 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-extrabold text-xs rounded-xl flex items-center justify-center space-x-1 transition-colors"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>+ Add Another Item</span>
+                    <span>{t.add_another_item}</span>
                   </button>
                 </div>
 
                 {/* Subtotal Display */}
                 <div className="flex justify-between items-center pt-2 border-t border-slate-200 dark:border-slate-700 text-xs font-extrabold">
-                  <span className="text-slate-600 dark:text-slate-400 uppercase">Subtotal Amount:</span>
+                  <span className="text-slate-600 dark:text-slate-400 uppercase">{t.subtotal_amount}:</span>
                   <span className="text-base text-slate-900 dark:text-slate-100 font-black">
                     {formatShopCurrency(rawSubtotal, shop?.country, shop?.currency_code)}
                   </span>
@@ -854,7 +854,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                   className="flex-1 py-3 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-extrabold rounded-xl text-xs hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors flex items-center justify-center space-x-1"
                 >
                   <ArrowLeft className="w-4 h-4" />
-                  <span>Back</span>
+                  <span>{t.back}</span>
                 </button>
                 <button
                   type="button"
@@ -867,7 +867,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                   }}
                   className="flex-1 py-3 bg-blue-600 text-white font-black rounded-xl text-xs hover:bg-blue-700 transition-colors flex items-center justify-center space-x-1 shadow-md"
                 >
-                  <span>Next: Discount & GST</span>
+                  <span>{t.next_discount_gst}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
@@ -875,7 +875,7 @@ export const AddTransactionModal: React.FC<Props> = ({
           )}
 
           {/* ========================================================================= */}
-          {/* STEP 4: DISCOUNT & GST (REQUIREMENT #3, #4, #5) */}
+          {/* STEP 4: DISCOUNT & GST */}
           {/* ========================================================================= */}
           {currentStep === 4 && isSaleMode && (
             <div className="space-y-4">
@@ -885,7 +885,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-black text-slate-900 dark:text-slate-100 flex items-center">
                     <Tag className="w-4 h-4 mr-1 text-emerald-600 dark:text-emerald-400" />
-                    <span>Apply Discount (Optional)</span>
+                    <span>{t.apply_discount}</span>
                   </span>
 
                   <button
@@ -895,7 +895,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                       isDiscountEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
                     }`}
                   >
-                    {isDiscountEnabled ? 'Discount On' : 'No Discount'}
+                    {isDiscountEnabled ? t.discount_on : t.no_discount}
                   </button>
                 </div>
 
@@ -909,7 +909,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                           discountType === 'fixed' ? 'bg-emerald-600 text-white' : 'text-slate-700 dark:text-slate-300'
                         }`}
                       >
-                        Fixed Amount ({resolveCurrencySymbol(shop?.country, shop?.currency_code)})
+                        {t.fixed_amount} ({resolveCurrencySymbol(shop?.country, shop?.currency_code)})
                       </button>
                       <button
                         type="button"
@@ -918,7 +918,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                           discountType === 'percentage' ? 'bg-emerald-600 text-white' : 'text-slate-700 dark:text-slate-300'
                         }`}
                       >
-                        Percentage (%)
+                        {t.percentage_discount}
                       </button>
                     </div>
 
@@ -941,15 +941,15 @@ export const AddTransactionModal: React.FC<Props> = ({
                 )}
               </div>
 
-              {/* GST SECTION (REQUIREMENT #3, #4: GST-INCLUSIVE ENGINE) */}
+              {/* GST SECTION */}
               <div className="bg-blue-50/80 dark:bg-blue-950/70 p-3.5 rounded-2xl border border-blue-200 dark:border-blue-800 space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-xs font-black text-blue-950 dark:text-blue-100 flex items-center">
                       <Percent className="w-4 h-4 mr-1 text-blue-600 shrink-0" />
-                      <span>GST Tax (Optional)</span>
+                      <span>{t.apply_gst}</span>
                     </span>
-                    <p className="text-[10px] text-blue-700 dark:text-blue-300 font-extrabold">GST included in price</p>
+                    <p className="text-[10px] text-blue-700 dark:text-blue-300 font-extrabold">{t.gst_included_label}</p>
                   </div>
 
                   <button
@@ -960,16 +960,16 @@ export const AddTransactionModal: React.FC<Props> = ({
                     }`}
                   >
                     {isGstEnabled ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-                    <span>{isGstEnabled ? 'GST On' : 'GST Off'}</span>
+                    <span>{isGstEnabled ? t.gst_on : t.gst_off}</span>
                   </button>
                 </div>
 
                 {isGstEnabled && (
                   <div className="space-y-2.5 pt-2 border-t border-blue-200 dark:border-blue-800 animate-in fade-in">
                     <div className="text-xs font-bold text-blue-900 dark:text-blue-200 flex items-center justify-between">
-                      <span>GST Rate:</span>
+                      <span>{t.select_gst_rate}:</span>
                       <span className="font-mono text-xs bg-blue-100 dark:bg-blue-900 px-2 py-0.5 rounded font-black text-blue-800 dark:text-blue-200">
-                        {gstRate}% (Included)
+                        {gstRate}% ({t.gst_included_label.split(' ')[0] || 'Included'})
                       </span>
                     </div>
 
@@ -990,19 +990,19 @@ export const AddTransactionModal: React.FC<Props> = ({
                       ))}
                     </div>
 
-                    {/* GST-INCLUSIVE BREAKDOWN DISPLAY (REQUIREMENT #5) */}
+                    {/* GST-INCLUSIVE BREAKDOWN DISPLAY */}
                     {gstCalc.taxAmount > 0 && (
                       <div className="text-xs space-y-1 pt-1 text-blue-950 dark:text-blue-100 font-semibold bg-white/70 dark:bg-slate-900/60 p-2.5 rounded-xl border border-blue-200 dark:border-blue-900">
                         <div className="flex justify-between">
-                          <span>Selling Price (GST Incl):</span>
+                          <span>{t.unit_price_label}:</span>
                           <span className="font-bold">{formatShopCurrency(finalSellingPrice, shop?.country, shop?.currency_code)}</span>
                         </div>
                         <div className="flex justify-between text-slate-700 dark:text-slate-300">
-                          <span>Taxable Value (Base):</span>
+                          <span>{t.taxable_value_label}:</span>
                           <span className="font-bold">{formatShopCurrency(gstCalc.baseAmount, shop?.country, shop?.currency_code)}</span>
                         </div>
                         <div className="flex justify-between text-blue-800 dark:text-blue-300 font-bold">
-                          <span>GST Amount ({gstRate}%):</span>
+                          <span>{t.tax_amount} ({gstRate}%):</span>
                           <span>+{formatShopCurrency(gstCalc.taxAmount, shop?.country, shop?.currency_code)}</span>
                         </div>
                       </div>
@@ -1019,14 +1019,14 @@ export const AddTransactionModal: React.FC<Props> = ({
                   className="flex-1 py-3 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-extrabold rounded-xl text-xs hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors flex items-center justify-center space-x-1"
                 >
                   <ArrowLeft className="w-4 h-4" />
-                  <span>Back</span>
+                  <span>{t.back}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setCurrentStep(5)}
                   className="flex-1 py-3 bg-blue-600 text-white font-black rounded-xl text-xs hover:bg-blue-700 transition-colors flex items-center justify-center space-x-1 shadow-md"
                 >
-                  <span>Next: Payment Details</span>
+                  <span>{t.next_payment_details}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
@@ -1034,7 +1034,7 @@ export const AddTransactionModal: React.FC<Props> = ({
           )}
 
           {/* ========================================================================= */}
-          {/* STEP 5: PAYMENT & DUE SUMMARY (REQUIREMENT #2, #9) */}
+          {/* STEP 5: PAYMENT & DUE SUMMARY */}
           {/* ========================================================================= */}
           {currentStep === 5 && selectedCustomer && (
             <div className="space-y-4">
@@ -1043,17 +1043,17 @@ export const AddTransactionModal: React.FC<Props> = ({
               {txMode === 'cash_sale' && (
                 <div className="bg-emerald-50/90 dark:bg-emerald-950/70 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 space-y-2 text-xs">
                   <div className="flex justify-between items-center text-slate-800 dark:text-slate-200 font-bold">
-                    <span>Grand Total Amount:</span>
+                    <span>{t.total_with_tax}:</span>
                     <span className="font-black text-slate-900 dark:text-slate-100 text-base">{formatShopCurrency(grandTotalAmount, shop?.country, shop?.currency_code)}</span>
                   </div>
                   <div className="flex justify-between items-center text-emerald-900 dark:text-emerald-200 font-black border-t border-emerald-200/60 dark:border-emerald-800 pt-2">
-                    <span>Paid Amount (Cash):</span>
+                    <span>{t.customer_paid} (Cash):</span>
                     <span className="font-black text-emerald-600 dark:text-emerald-400 text-base">{formatShopCurrency(grandTotalAmount, shop?.country, shop?.currency_code)}</span>
                   </div>
                   <div className="flex justify-between items-center pt-1">
-                    <span className="font-bold text-slate-600 dark:text-slate-400">Payment Status:</span>
+                    <span className="font-bold text-slate-600 dark:text-slate-400">{t.type}:</span>
                     <span className="bg-emerald-600 text-white px-2.5 py-0.5 rounded-md font-black text-[10px] uppercase">
-                      ✓ PAID IN FULL
+                      ✓ {t.paid_up}
                     </span>
                   </div>
                 </div>
@@ -1063,7 +1063,7 @@ export const AddTransactionModal: React.FC<Props> = ({
               {txMode === 'credit_sale' && (
                 <div className="bg-rose-50/90 dark:bg-rose-950/70 p-4 rounded-2xl border border-rose-200 dark:border-rose-800 space-y-2.5 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="font-black text-slate-900 dark:text-slate-100">Paid Now / Down Payment (Optional)</span>
+                    <span className="font-black text-slate-900 dark:text-slate-100">{t.paid_now_label}</span>
                     <input
                       type="number"
                       min="0"
@@ -1076,21 +1076,21 @@ export const AddTransactionModal: React.FC<Props> = ({
 
                   <div className="space-y-1.5 pt-2 border-t border-rose-200/60 dark:border-rose-800 text-slate-800 dark:text-slate-200 font-bold">
                     <div className="flex justify-between">
-                      <span>Grand Total Purchase:</span>
+                      <span>{t.total_with_tax}:</span>
                       <span>{formatShopCurrency(grandTotalAmount, shop?.country, shop?.currency_code)}</span>
                     </div>
                     <div className="flex justify-between text-rose-700 dark:text-rose-300 font-extrabold">
-                      <span>New Purchase Due:</span>
+                      <span>{t.new_purchase_due}:</span>
                       <span>{formatShopCurrency(newPurchaseDue, shop?.country, shop?.currency_code)}</span>
                     </div>
                     
                     <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                      <span>Previous Outstanding Due:</span>
+                      <span>{t.previous_outstanding_due}:</span>
                       <span>{formatShopCurrency(previousDue, shop?.country, shop?.currency_code)}</span>
                     </div>
                     
                     <div className="flex justify-between items-center text-slate-900 dark:text-slate-100 font-black text-sm pt-2 border-t border-rose-200 dark:border-rose-800">
-                      <span>Total Outstanding Due:</span>
+                      <span>{t.total_outstanding_due}:</span>
                       <span className="text-rose-600 dark:text-rose-400 text-base">{formatShopCurrency(remainingDue, shop?.country, shop?.currency_code)}</span>
                     </div>
                   </div>
@@ -1101,13 +1101,13 @@ export const AddTransactionModal: React.FC<Props> = ({
               {txMode === 'due_payment' && (
                 <div className="bg-blue-50/90 dark:bg-blue-950/70 p-4 rounded-2xl border border-blue-200 dark:border-blue-800 space-y-3 text-xs">
                   <div className="flex justify-between items-center text-blue-950 dark:text-blue-100 font-black pb-2 border-b border-blue-200 dark:border-blue-800">
-                    <span>Previous Outstanding Due:</span>
+                    <span>{t.previous_outstanding_due}:</span>
                     <span className="font-black text-rose-600 dark:text-rose-400 text-base">{formatShopCurrency(previousDue, shop?.country, shop?.currency_code)}</span>
                   </div>
 
                   <div>
                     <label className="block text-xs font-black text-slate-900 dark:text-slate-100 mb-1">
-                      Payment Amount Received <span className="text-rose-500">*</span>
+                      {t.payment_received} <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="number"
@@ -1120,7 +1120,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                   </div>
 
                   <div className="flex justify-between items-center pt-1 text-slate-900 dark:text-slate-100 font-black">
-                    <span>Remaining Outstanding Due:</span>
+                    <span>{t.remaining_outstanding_due}:</span>
                     <span className={`text-base font-black ${remainingDue <= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                       {formatShopCurrency(remainingDue, shop?.country, shop?.currency_code)}
                     </span>
@@ -1128,10 +1128,10 @@ export const AddTransactionModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* FUNCTIONAL PAYMENT METHOD SELECTOR (REQUIREMENT #2) */}
+              {/* FUNCTIONAL PAYMENT METHOD SELECTOR */}
               <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
                 <label className="block text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider">
-                  Payment Method <span className="text-rose-500">*</span>
+                  {t.payment_method_label} <span className="text-rose-500">*</span>
                 </label>
 
                 {/* Payment Method Grid Buttons with Distinct High-Contrast Selected State */}
@@ -1160,13 +1160,13 @@ export const AddTransactionModal: React.FC<Props> = ({
               {/* OPTIONAL PAYMENT NOTE */}
               <div>
                 <label className="block text-[11px] font-black text-slate-800 dark:text-slate-200 mb-1">
-                  Payment Note / Remarks (Optional)
+                  {t.payment_note_label}
                 </label>
                 <input
                   type="text"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="e.g. Partial down payment or cheque details"
+                  placeholder={t.payment_note_placeholder}
                   className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl text-xs font-medium outline-none"
                 />
               </div>
@@ -1179,20 +1179,20 @@ export const AddTransactionModal: React.FC<Props> = ({
                   className="flex-1 py-3 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-extrabold rounded-xl text-xs hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors flex items-center justify-center space-x-1"
                 >
                   <ArrowLeft className="w-4 h-4" />
-                  <span>Back</span>
+                  <span>{t.back}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     if (txMode === 'due_payment' && enteredVal <= 0) {
-                      alert('Please enter a valid payment amount.');
+                      alert(language === 'bn' ? 'সঠিক জমার পরিমাণ লিখুন।' : 'Please enter a valid payment amount.');
                       return;
                     }
                     setCurrentStep(6);
                   }}
                   className="flex-1 py-3 bg-blue-600 text-white font-black rounded-xl text-xs hover:bg-blue-700 transition-colors flex items-center justify-center space-x-1 shadow-md"
                 >
-                  <span>Review Transaction</span>
+                  <span>{t.review_transaction}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
@@ -1206,14 +1206,14 @@ export const AddTransactionModal: React.FC<Props> = ({
             <div className="space-y-4">
               <div className="bg-slate-900 dark:bg-slate-950 text-white p-4 rounded-2xl space-y-3 text-xs shadow-lg border border-slate-800">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span className="font-extrabold uppercase text-[10px] text-blue-400 tracking-wider">Transaction Summary</span>
+                  <span className="font-extrabold uppercase text-[10px] text-blue-400 tracking-wider">{t.tx_summary}</span>
                   <span className="font-black text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30">
-                    {txMode === 'cash_sale' ? 'Cash Sale' : txMode === 'credit_sale' ? 'Due Sale' : 'Payment Received'}
+                    {txMode === 'cash_sale' ? t.cash_sale_title.split(' ')[0] : txMode === 'credit_sale' ? t.credit_sale_title.split(' ')[0] : t.due_payment_title.split(' ')[0]}
                   </span>
                 </div>
 
                 <div className="space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Customer Info</div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">{t.receipt_customer}</div>
                   <div className="font-black text-white text-sm">{selectedCustomer.display_label}</div>
                   <div className="text-slate-400 font-medium">{selectedCustomer.phone_number}</div>
                   {customerAddress && <div className="text-slate-400 text-[11px]">📍 {customerAddress}</div>}
@@ -1221,7 +1221,7 @@ export const AddTransactionModal: React.FC<Props> = ({
 
                 {/* Payment Method Display */}
                 <div className="flex items-center space-x-2 text-blue-300 font-bold border-t border-slate-800 pt-2">
-                  <span>Payment Method:</span>
+                  <span>{t.payment_method_label}:</span>
                   <span className="bg-blue-900/80 text-blue-200 px-2 py-0.5 rounded text-[11px] font-black border border-blue-700">
                     {paymentMethod}
                   </span>
@@ -1229,7 +1229,7 @@ export const AddTransactionModal: React.FC<Props> = ({
 
                 {isSaleMode && items.length > 0 && (
                   <div className="space-y-1 border-t border-slate-800 pt-2">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase">Line Items</div>
+                    <div className="text-[10px] text-slate-400 font-bold uppercase">{t.product_breakdown}</div>
                     <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
                       {items.map((item, idx) => (
                         <div key={idx} className="flex justify-between text-[11px]">
@@ -1245,23 +1245,23 @@ export const AddTransactionModal: React.FC<Props> = ({
                   {isSaleMode && (
                     <>
                       <div className="flex justify-between">
-                        <span>Grand Total (GST Incl):</span>
+                        <span>{t.unit_price_label}:</span>
                         <span className="font-bold text-white">{formatShopCurrency(finalSellingPrice, shop?.country, shop?.currency_code)}</span>
                       </div>
                       {discountAmount > 0 && (
                         <div className="flex justify-between text-emerald-400 font-bold">
-                          <span>Discount:</span>
+                          <span>{t.apply_discount.split(' ')[1] || 'Discount'}:</span>
                           <span>-{formatShopCurrency(discountAmount, shop?.country, shop?.currency_code)}</span>
                         </div>
                       )}
                       {isGstEnabled && (
                         <>
                           <div className="flex justify-between text-slate-400">
-                            <span>Taxable Value (Base):</span>
+                            <span>{t.taxable_value_label}:</span>
                             <span>{formatShopCurrency(gstCalc.baseAmount, shop?.country, shop?.currency_code)}</span>
                           </div>
                           <div className="flex justify-between text-blue-300">
-                            <span>GST Amount ({gstRate}%):</span>
+                            <span>{t.tax_amount} ({gstRate}%):</span>
                             <span>+{formatShopCurrency(gstCalc.taxAmount, shop?.country, shop?.currency_code)}</span>
                           </div>
                         </>
@@ -1272,23 +1272,23 @@ export const AddTransactionModal: React.FC<Props> = ({
                   {txMode === 'credit_sale' && (
                     <>
                       <div className="flex justify-between text-emerald-400">
-                        <span>Paid Now:</span>
+                        <span>{t.paid_now_label.split(' ')[0]}:</span>
                         <span>{formatShopCurrency(paidNowVal, shop?.country, shop?.currency_code)}</span>
                       </div>
                       <div className="flex justify-between text-rose-400">
-                        <span>New Purchase Due:</span>
+                        <span>{t.new_purchase_due}:</span>
                         <span>{formatShopCurrency(newPurchaseDue, shop?.country, shop?.currency_code)}</span>
                       </div>
                     </>
                   )}
 
                   <div className="flex justify-between text-slate-400">
-                    <span>Previous Outstanding Due:</span>
+                    <span>{t.previous_outstanding_due}:</span>
                     <span>{formatShopCurrency(previousDue, shop?.country, shop?.currency_code)}</span>
                   </div>
 
                   <div className="flex justify-between items-center text-white font-black text-base pt-2 border-t border-slate-700">
-                    <span>Total Outstanding Due:</span>
+                    <span>{t.total_outstanding_due}:</span>
                     <span className={`text-lg font-black ${remainingDue > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
                       {formatShopCurrency(remainingDue, shop?.country, shop?.currency_code)}
                     </span>
@@ -1304,7 +1304,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                   className="flex-1 py-3.5 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-extrabold rounded-2xl text-xs hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors flex items-center justify-center space-x-1"
                 >
                   <ArrowLeft className="w-4 h-4" />
-                  <span>← Edit Details</span>
+                  <span>{t.edit_details}</span>
                 </button>
                 <button
                   type="button"
@@ -1313,7 +1313,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                   className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl text-xs shadow-lg shadow-emerald-600/30 transition-all active:scale-[0.98] flex items-center justify-center space-x-1.5 disabled:opacity-50"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>Confirm & Save & Generate Receipt</span>
+                  <span>{t.confirm_save_receipt}</span>
                 </button>
               </div>
             </div>

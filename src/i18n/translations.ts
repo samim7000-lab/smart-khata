@@ -159,7 +159,6 @@ export type TranslationKey =
   | 'receipt_address'
   | 'receipt_customer'
   | 'receipt_thank_you'
-  // AI Handwriting Scanner Keys (v4)
   | 'scan_ledger_page'
   | 'scan_ledger_title'
   | 'scan_ledger_subtitle'
@@ -172,12 +171,65 @@ export type TranslationKey =
   | 'create_new_customer_prompt'
   | 'confirm_and_save'
   | 'ledger_photo_proof'
-  // Google OAuth & Session UX Keys
   | 'continue_with_google'
   | 'or_sign_in_with'
   | 'welcome_back_account'
   | 'google_signin_error'
-  | 'continue_as';
+  | 'continue_as'
+  | 'step_title_1'
+  | 'step_title_2'
+  | 'step_title_3'
+  | 'step_title_4'
+  | 'step_title_5'
+  | 'step_title_6'
+  | 'progress'
+  | 'step_x_of_y'
+  | 'cash_sale_title'
+  | 'cash_sale_sub'
+  | 'credit_sale_title'
+  | 'credit_sale_sub'
+  | 'due_payment_title'
+  | 'due_payment_sub'
+  | 'emi_plan_title'
+  | 'emi_plan_sub'
+  | 'product_breakdown'
+  | 'product_name_label'
+  | 'product_name_placeholder'
+  | 'quantity_label'
+  | 'unit_price_label'
+  | 'add_another_item'
+  | 'subtotal_amount'
+  | 'apply_discount'
+  | 'discount_on'
+  | 'no_discount'
+  | 'fixed_amount'
+  | 'percentage_discount'
+  | 'apply_gst'
+  | 'gst_included_label'
+  | 'gst_on'
+  | 'gst_off'
+  | 'taxable_value_label'
+  | 'paid_now_label'
+  | 'new_purchase_due'
+  | 'previous_outstanding_due'
+  | 'total_outstanding_due'
+  | 'remaining_outstanding_due'
+  | 'payment_method_label'
+  | 'payment_note_label'
+  | 'payment_note_placeholder'
+  | 'review_transaction'
+  | 'tx_summary'
+  | 'edit_details'
+  | 'confirm_save_receipt'
+  | 'next_tx_type'
+  | 'next_items'
+  | 'next_discount_gst'
+  | 'next_payment_details'
+  | 'back_to_search'
+  | 'more_details_toggle'
+  | 'hide_optional_fields'
+  | 'more_payment_details'
+  | 'hide_payment_details';
 
 export const translations: Record<Language, Record<TranslationKey, string>> = {
   en: {
@@ -356,6 +408,60 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     welcome_back_account: 'Welcome Back ({email})',
     google_signin_error: 'Google sign-in could not be completed. Please try again.',
     continue_as: 'Continue as {name}',
+    step_title_1: 'Step 1: Select Customer',
+    step_title_2: 'Step 2: Select Transaction Type',
+    step_title_3: 'Step 3: Item & Price Details',
+    step_title_4: 'Step 4: Discount & GST (Optional)',
+    step_title_5: 'Step 5: Payment & Due Summary',
+    step_title_6: 'Step 6: Review & Confirm Transaction',
+    progress: 'Progress',
+    step_x_of_y: 'Step {current} of {total}',
+    cash_sale_title: 'Cash Sale (Fully Paid)',
+    cash_sale_sub: 'Customer pays full amount immediately',
+    credit_sale_title: 'Due Sale (Buy Now, Pay Later)',
+    credit_sale_sub: 'Customer buys on credit with optional down payment',
+    due_payment_title: 'Payment Received (Clear Due)',
+    due_payment_sub: 'Customer pays existing outstanding due balance',
+    emi_plan_title: 'EMI Installment Plan',
+    emi_plan_sub: 'Set up custom monthly EMI financing schedule',
+    product_breakdown: 'Product / Item Breakdown',
+    product_name_label: 'Product / Item Name',
+    product_name_placeholder: 'e.g. Medicine A',
+    quantity_label: 'Quantity',
+    unit_price_label: 'Selling Price (GST-Incl)',
+    add_another_item: '+ Add Another Item',
+    subtotal_amount: 'Subtotal Amount',
+    apply_discount: 'Apply Discount (Optional)',
+    discount_on: 'Discount On',
+    no_discount: 'No Discount',
+    fixed_amount: 'Fixed Amount',
+    percentage_discount: 'Percentage (%)',
+    apply_gst: 'GST Tax (Optional)',
+    gst_included_label: 'GST included in price',
+    gst_on: 'GST On',
+    gst_off: 'GST Off',
+    taxable_value_label: 'Taxable Value (Base)',
+    paid_now_label: 'Paid Now / Down Payment (Optional)',
+    new_purchase_due: 'New Purchase Due',
+    previous_outstanding_due: 'Previous Outstanding Due',
+    total_outstanding_due: 'Total Outstanding Due',
+    remaining_outstanding_due: 'Remaining Outstanding Due',
+    payment_method_label: 'Payment Method',
+    payment_note_label: 'Payment Note / Remarks (Optional)',
+    payment_note_placeholder: 'e.g. Partial down payment or cheque details',
+    review_transaction: 'Review Transaction',
+    tx_summary: 'Transaction Summary',
+    edit_details: '← Edit Details',
+    confirm_save_receipt: 'Confirm & Save & Generate Receipt',
+    next_tx_type: 'Next: Select Type',
+    next_items: 'Next: Item & Price',
+    next_discount_gst: 'Next: Discount & GST',
+    next_payment_details: 'Next: Payment Details',
+    back_to_search: 'Back to Search',
+    more_details_toggle: 'More Details (Address/GSTIN)',
+    hide_optional_fields: 'Hide Optional Fields',
+    more_payment_details: 'More Details (Payment Method / Note)',
+    hide_payment_details: 'Hide Payment Method & Note',
   },
   bn: {
     app_title: 'স্মার্ট খাতা',
@@ -533,6 +639,60 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     welcome_back_account: 'আবার স্বাগতম ({email})',
     google_signin_error: 'Google সাইন-ইন সম্পূর্ণ করা যায়নি। আবার চেষ্টা করুন।',
     continue_as: '{name} হিসেবে এগিয়ে যান',
+    step_title_1: 'ধাপ ১: কাস্টমার নির্বাচন',
+    step_title_2: 'ধাপ ২: লেনদেনের ধরন',
+    step_title_3: 'ধাপ ৩: পণ্য ও দামের বিবরণ',
+    step_title_4: 'ধাপ ৪: ছাড় ও জিএসটি (ঐচ্ছিক)',
+    step_title_5: 'ধাপ ৫: জমা ও বাকি হিসাব',
+    step_title_6: 'ধাপ ৬: যাচাই ও নিশ্চিতকরণ',
+    progress: 'অগ্রগতি',
+    step_x_of_y: 'ধাপ {current} / {total}',
+    cash_sale_title: 'নগদ বিক্রি (পুরো পরিশোধিত)',
+    cash_sale_sub: 'কাস্টমার সাথে সাথে পুরো টাকা পরিশোধ করবেন',
+    credit_sale_title: 'বাকি বিক্রি (পরে মূল্য পরিশোধ)',
+    credit_sale_sub: 'কাস্টমার বাকিতে কিনবেন ও কিছু জমা দিতে পারেন',
+    due_payment_title: 'টাকা জমা নেওয়া (বাকি আদায়)',
+    due_payment_sub: 'কাস্টমার পূর্বের বাকি পরিশোধ বা জমা করবেন',
+    emi_plan_title: 'কিস্তি বা ইএমআই প্ল্যান (EMI)',
+    emi_plan_sub: 'কাস্টমারের জন্য প্রতি মাসের কিস্তি সেটআপ করুন',
+    product_breakdown: 'পণ্যের বিবরণ ও পণ্যের তালিকা',
+    product_name_label: 'পণ্যের নাম',
+    product_name_placeholder: 'যেমন: ওষুধ A',
+    quantity_label: 'পরিমাণ',
+    unit_price_label: 'বিক্রয়মূল্য (জিএসটি সহ)',
+    add_another_item: '+ আরও পণ্য যোগ করুন',
+    subtotal_amount: 'সাবটোটাল পরিমাণ',
+    apply_discount: 'ছাড় বা ডিসকাউন্ট (ঐচ্ছিক)',
+    discount_on: 'ছাড় চালু',
+    no_discount: 'কোনো ছাড় নেই',
+    fixed_amount: 'নির্দিষ্ট টাকা',
+    percentage_discount: 'শতাংশ (%)',
+    apply_gst: 'জিএসটি / ট্যাক্স (ঐচ্ছিক)',
+    gst_included_label: 'বিক্রয়মূল্যের মধ্যেই জিএসটি অন্তর্ভুক্ত',
+    gst_on: 'জিএসটি চালু',
+    gst_off: 'জিএসটি বন্ধ',
+    taxable_value_label: 'করযোগ্য আসল মূল্য (Base Value)',
+    paid_now_label: 'এখন জমা দেওয়া টাকা (ঐচ্ছিক)',
+    new_purchase_due: 'নতুন ক্রয়ের বাকি',
+    previous_outstanding_due: 'পূর্বের মোট বাকি',
+    total_outstanding_due: 'বর্তমান সর্বমোট বাকি',
+    remaining_outstanding_due: 'জমার পর বাকি',
+    payment_method_label: 'মূল্য পরিশোধের মাধ্যম',
+    payment_note_label: 'লেনদেনের নোট / মন্তব্য (ঐচ্ছিক)',
+    payment_note_placeholder: 'যেমন: আংশিক জমা বা চেকের বিবরণ',
+    review_transaction: 'লেনদেন যাচাই করুন',
+    tx_summary: 'লেনদেনের সারসংক্ষেপ',
+    edit_details: '← তথ্য পরিবর্তন করুন',
+    confirm_save_receipt: 'নিশ্চিত করুন ও রসিদ তৈরি করুন',
+    next_tx_type: 'সামনে: লেনদেনের ধরন',
+    next_items: 'সামনে: পণ্য ও দাম',
+    next_discount_gst: 'সামনে: ছাড় ও জিএসটি',
+    next_payment_details: 'সামনে: জমা ও বাকির বিবরণ',
+    back_to_search: 'খুঁজতে ফিরে যান',
+    more_details_toggle: 'আরও বিবরণ (ঠিকানা/জিএসটিIN)',
+    hide_optional_fields: 'ঐচ্ছিক তথ্য লুকান',
+    more_payment_details: 'আরও বিবরণ (পেমেন্ট মাধ্যম/নোট)',
+    hide_payment_details: 'পেমেন্ট মাধ্যম ও নোট লুকান',
   },
   hi: {
     app_title: 'स्मार्ट खाता',
@@ -710,5 +870,59 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     welcome_back_account: 'वापसी पर स्वागत है ({email})',
     google_signin_error: 'Google साइन-इन पूरा नहीं हो सका। कृपया फिर से प्रयास करें।',
     continue_as: '{name} के रूप में आगे बढ़ें',
+    step_title_1: 'चरण 1: ग्राहक चुनें',
+    step_title_2: 'चरण 2: लेन-देन का प्रकार',
+    step_title_3: 'चरण 3: आइटम और मूल्य विवरण',
+    step_title_4: 'चरण 4: छूट और जीएसटी (वैकल्पिक)',
+    step_title_5: 'चरण 5: भुगतान और बकाया सारांश',
+    step_title_6: 'चरण 6: समीक्षा और पुष्टि',
+    progress: 'प्रगति',
+    step_x_of_y: 'चरण {current} / {total}',
+    cash_sale_title: 'नकद बिक्री (पूर्ण भुगतान)',
+    cash_sale_sub: 'ग्राहक तुरंत पूरी राशि का भुगतान करता है',
+    credit_sale_title: 'उधार बिक्री (अभी खरीदें, बाद में दें)',
+    credit_sale_sub: 'ग्राहक उधार पर खरीदता है और अग्रिम भुगतान कर सकता है',
+    due_payment_title: 'भुगतान प्राप्त हुआ (उधार जमा)',
+    due_payment_sub: 'ग्राहक मौजूदा बकाया राशि का भुगतान करता है',
+    emi_plan_title: 'ईएमआई किश्त योजना (EMI)',
+    emi_plan_sub: 'कस्टम मासिक ईएमआई किश्त योजना सेट करें',
+    product_breakdown: 'आइटम और सामान का विवरण',
+    product_name_label: 'आइटम / सामान का नाम',
+    product_name_placeholder: 'उदा. दवा A',
+    quantity_label: 'मात्रा (Qty)',
+    unit_price_label: 'बिक्री मूल्य (जीएसटी सहित)',
+    add_another_item: '+ एक और आइटम जोड़ें',
+    subtotal_amount: 'उप-कुल राशि (Subtotal)',
+    apply_discount: 'छूट लागू करें (वैकल्पिक)',
+    discount_on: 'छूट चालू',
+    no_discount: 'कोई छूट नहीं',
+    fixed_amount: 'निश्चित राशि',
+    percentage_discount: 'प्रतिशत (%)',
+    apply_gst: 'जीएसटी कर (वैकल्पिक)',
+    gst_included_label: 'बिक्री मूल्य में जीएसटी शामिल है',
+    gst_on: 'जीएसटी चालू',
+    gst_off: 'जीएसटी बंद',
+    taxable_value_label: 'कर योग्य मूल्य (Base Value)',
+    paid_now_label: 'अभी जमा की गई राशि (वैकल्पिक)',
+    new_purchase_due: 'नई खरीद का बकाया',
+    previous_outstanding_due: 'पिछला कुल बकाया',
+    total_outstanding_due: 'वर्तमान कुल बकाया',
+    remaining_outstanding_due: 'भुगतान के बाद बकाया',
+    payment_method_label: 'भुगतान का तरीका',
+    payment_note_label: 'भुगतान नोट / टिप्पणी (वैकल्पिक)',
+    payment_note_placeholder: 'उदा. आंशिक भुगतान या चेक विवरण',
+    review_transaction: 'लेन-देन की समीक्षा करें',
+    tx_summary: 'लेन-देन का सारांश',
+    edit_details: '← विवरण बदलें',
+    confirm_save_receipt: 'पुष्टि करें और रसीद बनाएं',
+    next_tx_type: 'आगे: प्रकार चुनें',
+    next_items: 'आगे: सामान और मूल्य',
+    next_discount_gst: 'आगे: छूट और जीएसटी',
+    next_payment_details: 'आगे: भुगतान विवरण',
+    back_to_search: 'खोज पर वापस जाएं',
+    more_details_toggle: 'अधिक विवरण (पता/जीएसटीIN)',
+    hide_optional_fields: 'वैकल्पिक विवरण छिपाएं',
+    more_payment_details: 'अधिक विवरण (भुगतान तरीका/नोट)',
+    hide_payment_details: 'भुगतान तरीका और नोट छिपाएं',
   },
 };
