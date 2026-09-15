@@ -25,8 +25,11 @@ import { validatePhoneNumber } from '../lib/phoneValidation';
 import { getCountryByCode } from '../data/countries';
 import { printTransactionReceiptPDF } from '../lib/pdfGenerator';
 import { getWhatsAppUrl } from '../lib/whatsappUtils';
+import { dispatchWhatsApp, validateCustomerPhone } from '../lib/whatsappService';
 import { formatShopCurrency } from '../lib/countryPricing';
 import { unpackReceiptNote, calculatePreviousBalance } from '../lib/receiptUtils';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { CountryPhoneInput } from './CountryPhoneInput';
 
 interface Props {
   transaction: Transaction;
@@ -35,6 +38,7 @@ interface Props {
   language: Language;
   transactions?: Transaction[];
   onClose: () => void;
+  onUpdateCustomer?: (updated: Customer) => void;
 }
 
 export const ReceiptModal: React.FC<Props> = ({
@@ -44,9 +48,14 @@ export const ReceiptModal: React.FC<Props> = ({
   language,
   transactions = [],
   onClose,
+  onUpdateCustomer,
 }) => {
   const t = translations[language];
   const receiptRef = useRef<HTMLDivElement>(null);
+  const [activeCustomer, setActiveCustomer] = useState<Customer>(customer);
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
+  const [editedPhone, setEditedPhone] = useState(customer.phone_number || '');
+  const [isSavingPhone, setIsSavingPhone] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
@@ -133,7 +142,7 @@ ${shopAddressStr ? `Address: ${shopAddressStr}\n` : ''}${shop.owner_name ? `Owne
 📅 *Date:* ${dateFormatted} ${timeFormatted}
 ----------------------------
 👤 *CUSTOMER:* ${customer.display_label || customer.name}
-📱 *Mobile:* ${customer.phone_number || 'N/A'}
+📱 *Mobile:* ${activeCustomer.phone_number || 'N/A'}
 ${customerAddressStr ? `📍 *Address:* ${customerAddressStr}\n` : ''}${customerGstinStr ? `GSTIN: ${customerGstinStr}\n` : ''}----------------------------
 💰 *${typeLabel.toUpperCase()}:* ${fmt(txAmt)}
 ${prevBalance > 0 || isCredit ? `🔴 *${labelPrevDue}:* ${fmt(prevBalance)}\n` : ''}🔴 *${labelCurrentDue}:* ${fmt(currentBalance)}
@@ -141,12 +150,12 @@ ${prevBalance > 0 || isCredit ? `🔴 *${labelPrevDue}:* ${fmt(prevBalance)}\n` 
 Thank you for your business! - ${shop.shop_name}`;
 
   // Phone validation & WhatsApp URL resolution
-  const cleanPhone = (customer.phone_number || '').trim();
+  const cleanPhone = (activeCustomer.phone_number || '').trim();
   const isPhoneMissing = !cleanPhone;
   const countryConfig = getCountryByCode(shop.country || 'IN');
   const phoneVal = cleanPhone ? validatePhoneNumber(cleanPhone, countryConfig, language) : { isValid: true };
   const hasValidPhone = phoneVal.isValid;
-  const waUrl = getWhatsAppUrl(customer.phone_number, receiptText, shop.country || 'IN');
+  const waUrl = getWhatsAppUrl(activeCustomer.phone_number, receiptText, shop.country || 'IN');
 
   // Ultra High Resolution 4K Image Generation via html2canvas (Scale 4.0 for sharp font rendering)
   const generateCanvasFile = async (): Promise<File | null> => {
@@ -171,7 +180,7 @@ Thank you for your business! - ${shop.shop_name}`;
           }
           const file = new File(
             [blob],
-            `Invoice_${receiptNumber}_${customer.name.replace(/\s+/g, '_')}.png`,
+            `Invoice_${receiptNumber}_${activeCustomer.name.replace(/\s+/g, '_')}.png`,
             { type: 'image/png' }
           );
           resolve(file);
@@ -183,14 +192,11 @@ Thank you for your business! - ${shop.shop_name}`;
     }
   };
 
-  // WhatsApp Native Share or Direct Link Share
+  // WhatsApp Native Share or Direct Link Share via Unified dispatchWhatsApp
   const handleShareNativeOrDownload = async () => {
-    if (isPhoneMissing) {
-      setToastMsg('⚠️ Customer phone number is missing.');
-      return;
-    }
-    if (!hasValidPhone) {
-      setToastMsg(`⚠️ ${phoneVal.errorMsg || (language === 'bn' ? 'সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.')}`);
+    const valResult = validateCustomerPhone(activeCustomer.phone_number, shop?.country || 'IN', language);
+    if (!valResult.isValid) {
+      setIsPhoneModalOpen(true);
       return;
     }
 
@@ -198,40 +204,80 @@ Thank you for your business! - ${shop.shop_name}`;
     const file = await generateCanvasFile();
     setIsGenerating(false);
 
-    if (!file) {
-      window.open(waUrl, '_blank');
+    const res = await dispatchWhatsApp({
+      type: 'RECEIPT',
+      customer: activeCustomer,
+      shop,
+      language,
+      transaction,
+      receiptDetails: details,
+      mediaFile: file,
+    });
+
+    if (res.success) {
+      if (res.action === 'native_shared') {
+        setToastMsg('✅ ' + (language === 'bn' ? 'শেয়ার উইন্ডো খোলা হয়েছে' : 'Shared via device sheet'));
+      } else if (res.action === 'meta_cloud_sent') {
+        setToastMsg('✅ ' + res.statusMessage);
+      } else {
+        // Deep link opened - download image fallback for desktop / non-canShare mobile browsers
+        if (file && typeof navigator !== 'undefined' && (!navigator.canShare || !navigator.canShare({ files: [file] }))) {
+          const url = URL.createObjectURL(file);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = file.name;
+          link.click();
+          URL.revokeObjectURL(url);
+        }
+        setToastMsg('🚀 ' + (language === 'bn' ? 'হোয়াটসঅ্যাপ খোলা হয়েছে! চ্যাটে সেন্ড বাটনে চাপ দিন।' : language === 'hi' ? 'व्हाट्सएप खुल गया! कृपया चैट में सेंड बटन दबाएं।' : 'WhatsApp opened / Ready to send (Tap Send in chat)'));
+      }
+    } else {
+      if (res.action === 'cancelled') {
+        setToastMsg('ℹ️ ' + (language === 'bn' ? 'বাতিল করা হয়েছে' : 'Cancelled'));
+      } else {
+        setToastMsg('⚠️ ' + (res.statusMessage || 'Failed to dispatch WhatsApp'));
+      }
+    }
+    setTimeout(() => setToastMsg(''), 5000);
+  };
+
+  // Save / Update Phone Number to Supabase
+  const handleSavePhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = editedPhone.trim();
+    if (!trimmed) {
+      setToastMsg('⚠️ ' + (language === 'bn' ? 'অনুগ্রহ করে একটি মোবাইল নম্বর দিন।' : 'Please enter a mobile number.'));
       return;
     }
 
-    // Native Web Share API (File attachment on mobile Safari / Chrome)
-    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
+    setIsSavingPhone(true);
+    const updatedCust: Customer = {
+      ...activeCustomer,
+      phone_number: trimmed,
+    };
+
+    if (isSupabaseConfigured && supabase && !activeCustomer.id.startsWith('cust-') && !activeCustomer.id.startsWith('temp-')) {
       try {
-        await navigator.share({
-          title: `Receipt from ${shop.shop_name}`,
-          text: `Hello ${customer.display_label || customer.name}, your receipt from ${shop.shop_name} is ready.`,
-          files: [file],
-        });
-        return;
-      } catch (err: any) {
-        if (err.name === 'AbortError') return;
-        console.warn('Native share cancelled, falling back to direct link:', err);
+        const { error } = await supabase
+          .from('customers')
+          .update({ phone_number: trimmed })
+          .eq('id', activeCustomer.id);
+        if (error) {
+          console.error('[RECEIPT-MODAL] DB error updating phone:', error);
+        }
+      } catch (err) {
+        console.error('[RECEIPT-MODAL] Exception updating phone:', err);
       }
     }
 
-    // Fallback: Download High-Res Image + Open WhatsApp Web/App Link
-    const url = URL.createObjectURL(file);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = file.name;
-    link.click();
-    URL.revokeObjectURL(url);
-
-    setToastMsg('📸 High-Res Receipt Image downloaded! Opening WhatsApp...');
-    setTimeout(() => setToastMsg(''), 4000);
-
-    setTimeout(() => {
-      window.open(waUrl, '_blank');
-    }, 600);
+    setActiveCustomer(updatedCust);
+    if (onUpdateCustomer) {
+      onUpdateCustomer(updatedCust);
+    }
+    setIsSavingPhone(false);
+    setIsPhoneModalOpen(false);
+    setToastMsg('✅ ' + (language === 'bn' ? 'ফোন নম্বর সংরক্ষিত হয়েছে।' : 'Phone number saved!'));
+    setTimeout(() => setToastMsg(''), 3000);
   };
 
   const handleDownloadImage = async () => {
@@ -353,11 +399,20 @@ Thank you for your business! - ${shop.shop_name}`;
                   <span>{customerAddressStr}</span>
                 </div>
               )}
-              {customer.phone_number && (
+              {activeCustomer.phone_number ? (
                 <div className="text-slate-700 font-bold flex items-center space-x-1">
                   <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                  <span>{customer.phone_number}</span>
+                  <span>{activeCustomer.phone_number}</span>
                 </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsPhoneModalOpen(true)}
+                  className="inline-flex items-center space-x-1 text-[11px] font-bold text-amber-600 hover:text-amber-700 hover:underline print:hidden"
+                >
+                  <Phone className="w-3 h-3 text-amber-500 shrink-0" />
+                  <span>+ {language === 'bn' ? 'মোবাইল নম্বর যোগ করুন' : 'Add Mobile Number'}</span>
+                </button>
               )}
               {customerGstinStr && (
                 <div className="font-mono text-[11px] text-slate-700 font-bold">
@@ -667,6 +722,56 @@ Thank you for your business! - ${shop.shop_name}`;
           </div>
         </div>
       </div>
+
+      {/* Add / Edit Phone Number Modal */}
+      {isPhoneModalOpen && (
+        <div className="fixed inset-0 z-60 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-3xl max-w-sm w-full p-6 space-y-4 border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="font-extrabold text-base flex items-center">
+                <Phone className="w-4 h-4 mr-2 text-blue-600" />
+                <span>{activeCustomer.phone_number ? t.update_phone : t.add_mobile_number}</span>
+              </h3>
+              <button
+                onClick={() => setIsPhoneModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-full"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePhone} className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1.5">
+                  {t.customer_phone} <span className="text-rose-500">*</span>
+                </label>
+                <CountryPhoneInput
+                  language={language}
+                  value={editedPhone}
+                  onChange={(e164) => setEditedPhone(e164)}
+                />
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPhoneModalOpen(false)}
+                  className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  {t.back}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPhone}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center space-x-1 disabled:opacity-50"
+                >
+                  <span>{t.save_profile}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

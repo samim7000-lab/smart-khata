@@ -7,6 +7,7 @@ import {
   replaceMessageVariables,
   IDeliveryProvider
 } from '../lib/communicationEngine';
+import { validateCustomerPhone } from '../lib/whatsappService';
 import { BusinessMediaItem } from '../lib/mediaUtils';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import {
@@ -228,9 +229,9 @@ export const CampaignsScreen: React.FC<Props> = ({
 
   // Limit Check Helper for Toggling a Customer Selection
   const handleToggleCustomer = (cust: Customer) => {
-    const cleanPhone = (cust.phone_number || '').replace(/\D/g, '');
-    if (cleanPhone.length < 8) {
-      alert(`Customer "${cust.name}" does not have a valid WhatsApp phone number (${cust.phone_number || 'Missing'}). Cannot add to campaign.`);
+    const valResult = validateCustomerPhone(cust.phone_number, shop?.country, language);
+    if (!valResult.isValid) {
+      alert(`Customer "${cust.name}": ${valResult.errorMsg || 'Invalid phone number'}`);
       return;
     }
 
@@ -252,7 +253,9 @@ export const CampaignsScreen: React.FC<Props> = ({
 
   // Select All Eligible Toggle
   const handleToggleSelectEligible = () => {
-    const eligibleCusts = filteredShopCustomers.filter((c) => (c.phone_number || '').replace(/\D/g, '').length >= 8);
+    const eligibleCusts = filteredShopCustomers.filter(
+      (c) => validateCustomerPhone(c.phone_number, shop?.country, language).isValid
+    );
     if (selectedCustomerIds.size >= eligibleCusts.length && eligibleCusts.length > 0) {
       setSelectedCustomerIds(new Set());
     } else {
@@ -312,9 +315,9 @@ export const CampaignsScreen: React.FC<Props> = ({
 
   // Dispatch message to individual recipient with real persistent tracking
   const handleDispatchCustomer = async (cust: Customer, campaignId?: string) => {
-    const cleanPhone = (cust.phone_number || '').replace(/\D/g, '');
-    if (cleanPhone.length < 8) {
-      alert(`Invalid phone number for ${cust.name}. Cannot dispatch.`);
+    const valResult = validateCustomerPhone(cust.phone_number, shop?.country, language);
+    if (!valResult.isValid) {
+      alert(valResult.errorMsg || `Invalid phone number for ${cust.name}. Cannot dispatch.`);
       return;
     }
 

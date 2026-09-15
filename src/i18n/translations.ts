@@ -229,7 +229,17 @@ export type TranslationKey =
   | 'more_details_toggle'
   | 'hide_optional_fields'
   | 'more_payment_details'
-  | 'hide_payment_details';
+  | 'hide_payment_details'
+  | 'whatsapp_chat'
+  | 'save_contact'
+  | 'add_mobile_number'
+  | 'send_due_reminder'
+  | 'whatsapp_opened_notice'
+  | 'missing_phone_notice'
+  | 'contact_saved_notice'
+  | 'customer_phone_updated'
+  | 'update_phone'
+  | 'enter_customer_phone';
 
 export const translations: Record<Language, Record<TranslationKey, string>> = {
   en: {
@@ -462,6 +472,16 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     hide_optional_fields: 'Hide Optional Fields',
     more_payment_details: 'More Details (Payment Method / Note)',
     hide_payment_details: 'Hide Payment Method & Note',
+    whatsapp_chat: 'WhatsApp',
+    save_contact: 'Save Contact',
+    add_mobile_number: 'Add Mobile Number',
+    send_due_reminder: 'Send Due Reminder',
+    whatsapp_opened_notice: 'WhatsApp opened! Please tap Send inside chat.',
+    missing_phone_notice: 'Customer phone number is missing.',
+    contact_saved_notice: 'Contact vCard (.vcf) downloaded!',
+    customer_phone_updated: 'Customer phone updated successfully!',
+    update_phone: 'Update Phone Number',
+    enter_customer_phone: 'Enter customer mobile number',
   },
   bn: {
     app_title: 'স্মার্ট খাতা',
@@ -693,6 +713,16 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     hide_optional_fields: 'ঐচ্ছিক তথ্য লুকান',
     more_payment_details: 'আরও বিবরণ (পেমেন্ট মাধ্যম/নোট)',
     hide_payment_details: 'পেমেন্ট মাধ্যম ও নোট লুকান',
+    whatsapp_chat: 'হোয়াটসঅ্যাপ',
+    save_contact: 'কন্টাক্ট সেভ করুন',
+    add_mobile_number: 'মোবাইল নম্বর যোগ করুন',
+    send_due_reminder: 'বকেয়া তাগাদা পাঠান',
+    whatsapp_opened_notice: 'হোয়াটসঅ্যাপ চালু হয়েছে! চ্যাটে সেন্ড বাটনে চাপ দিন।',
+    missing_phone_notice: 'কাস্টমারের ফোন নম্বর দেওয়া নেই।',
+    contact_saved_notice: 'কন্টাক্ট ভি-কার্ড (.vcf) ডাউনলোড হয়েছে!',
+    customer_phone_updated: 'কাস্টমারের ফোন নম্বর সফলভাবে আপডেট হয়েছে!',
+    update_phone: 'ফোন নম্বর পরিবর্তন',
+    enter_customer_phone: 'কাস্টমারের মোবাইল নম্বর লিখুন',
   },
   hi: {
     app_title: 'स्मार्ट खाता',
@@ -924,5 +954,15 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     hide_optional_fields: 'वैकल्पिक विवरण छिपाएं',
     more_payment_details: 'अधिक विवरण (भुगतान तरीका/नोट)',
     hide_payment_details: 'भुगतान तरीका और नोट छिपाएं',
+    whatsapp_chat: 'व्हाट्सएप',
+    save_contact: 'संपर्क सहेजें',
+    add_mobile_number: 'मोबाइल नंबर जोड़ें',
+    send_due_reminder: 'बकाया रिमाइंडर भेजें',
+    whatsapp_opened_notice: 'व्हाट्सएप खुल गया! कृपया चैट में सेंड बटन दबाएं।',
+    missing_phone_notice: 'ग्राहक का फोन नंबर उपलब्ध नहीं है।',
+    contact_saved_notice: 'संपर्क वी-कार्ड (.vcf) डाउनलोड हो गया!',
+    customer_phone_updated: 'ग्राहक का फोन नंबर सफलतापूर्वक अपडेट किया गया!',
+    update_phone: 'फोन नंबर बदलें',
+    enter_customer_phone: 'ग्राहक का मोबाइल नंबर दर्ज करें',
   },
 };

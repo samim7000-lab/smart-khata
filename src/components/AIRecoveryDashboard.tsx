@@ -11,6 +11,7 @@ import { WhatsAppDirectLinkProvider } from '../lib/communicationEngine';
 import { EntitlementService } from '../lib/entitlementEngine';
 import { EMIService, EMIAccountDB, EMIInstallmentDB } from '../lib/emiService';
 import { isValidUuid } from '../lib/uuidGuard';
+import { dispatchWhatsApp } from '../lib/whatsappService';
 import { EMIForm } from './EMIForm';
 import { EMIAccountDetail } from './EMIAccountDetail';
 import {
@@ -19,6 +20,7 @@ import {
   Zap,
   TrendingUp,
   Send,
+  MessageCircle,
   Lock,
   CreditCard,
   CheckCircle2,
@@ -187,24 +189,28 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
   const mediumCount = recoveryData.recommendations.filter((r) => r.priorityTier === 'medium').length;
   const lowCount = recoveryData.recommendations.filter((r) => r.priorityTier === 'low').length;
 
-  const handleSendWA = (analysis: AIRecoveryAnalysis) => {
+  const handleSendWA = async (analysis: AIRecoveryAnalysis) => {
     const textToSend = editingAnalysis?.customer.id === analysis.customer.id ? customMsgText : analysis.suggestedMessage;
-    deliveryProvider.dispatch({
-      recipient: analysis.customer,
+    await dispatchWhatsApp({
+      type: 'CUSTOM',
+      customer: analysis.customer,
       shop,
-      rawText: textToSend,
+      language,
+      customText: textToSend,
     });
     // Log reminder sent timestamp for cooldown tracking
     recordReminderSent(analysis.customer.id);
     setEditingAnalysis(null);
   };
 
-  const handleSendEmiWA = (record: EMIRecord) => {
+  const handleSendEmiWA = async (record: EMIRecord) => {
     const msg = `Hello ${record.customer.name}, friendly reminder from ${shop.shop_name}: EMI #${record.emiNumber} of ${record.totalEmiCount} for ${record.productName} is due (${formatShopCurrency(record.remainingAmount / record.totalEmiCount, shop.country, shop.currency_code)}). Due Date: ${record.nextDueDate}. Thank you!`;
-    deliveryProvider.dispatch({
-      recipient: record.customer,
+    await dispatchWhatsApp({
+      type: 'CUSTOM',
+      customer: record.customer,
       shop,
-      rawText: msg,
+      language,
+      customText: msg,
     });
   };
 

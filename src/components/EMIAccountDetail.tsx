@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Customer, Language, Shop } from '../types';
 import { EMIAccountDB, EMIInstallmentDB, EMIService } from '../lib/emiService';
 import { formatShopCurrency } from '../lib/countryPricing';
+import { dispatchWhatsApp } from '../lib/whatsappService';
 import {
   CreditCard,
   Calendar,
@@ -9,6 +10,7 @@ import {
   AlertCircle,
   Clock,
   Send,
+  MessageCircle,
   DollarSign,
   Loader2,
   X,
@@ -95,12 +97,27 @@ export const EMIAccountDetail: React.FC<Props> = ({
     }
   };
 
-  const handleSendWAReminder = (inst: EMIInstallmentDB) => {
-    setWaNotice(
-      language === 'bn'
-        ? `WhatsApp নোটিফিকেশন সুবিধা ভবিষ্যতে যুক্ত হবে। (${customer?.name || 'Customer'}-এর কিস্তি #${inst.installment_number})`
-        : `WhatsApp automation will be connected in a future phase. (Installment #${inst.installment_number} for ${customer?.name || 'Customer'})`
-    );
+  const handleSendWAReminder = async (inst: EMIInstallmentDB) => {
+    if (!customer) {
+      setWaNotice(language === 'bn' ? 'কাস্টমার পাওয়া যায়নি।' : 'Customer not found.');
+      setTimeout(() => setWaNotice(null), 4000);
+      return;
+    }
+
+    const res = await dispatchWhatsApp({
+      type: 'EMI_REMINDER',
+      customer,
+      shop,
+      emiInstallment: inst,
+      emiAccount: account,
+      language,
+    });
+
+    if (res.success) {
+      setWaNotice(res.statusMessage);
+    } else {
+      setWaNotice(res.statusMessage || (language === 'bn' ? 'WhatsApp পাঠানো যায়নি' : 'Failed to dispatch WhatsApp'));
+    }
     setTimeout(() => setWaNotice(null), 4000);
   };
 
@@ -256,10 +273,10 @@ export const EMIAccountDetail: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => handleSendWAReminder(inst)}
-                        className="p-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-xl transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+                        className="p-2 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 rounded-xl transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center border border-emerald-200 dark:border-emerald-800"
                         title="Send WhatsApp Reminder"
                       >
-                        <Send className="w-4 h-4 text-emerald-600" />
+                        <MessageCircle className="w-4 h-4 fill-current text-emerald-600" />
                       </button>
 
                       <button

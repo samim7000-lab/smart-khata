@@ -15,6 +15,7 @@ import {
 import { printMonthlyBusinessReportPDF } from '../lib/pdfGenerator';
 import { FileCheck2 } from 'lucide-react';
 import { formatShopCurrency } from '../lib/countryPricing';
+import { getWhatsAppChatUrl } from '../lib/whatsappService';
 
 interface Props {
   customers: Customer[];
@@ -68,7 +69,7 @@ export const ReportsScreen: React.FC<Props> = ({
 ----------------------------
 Thank you! - ${shop.owner_name}`;
 
-    const waUrl = `https://wa.me/?text=${encodeURIComponent(reportText)}`;
+    const waUrl = getWhatsAppChatUrl('', reportText, shop.country);
     window.open(waUrl, '_blank');
   };
 

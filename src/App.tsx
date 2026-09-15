@@ -1384,6 +1384,10 @@ export const App: React.FC = () => {
                       customers.find((c) => c.id === selectedCustomer.id) || selectedCustomer,
                   });
                 }}
+                onUpdateCustomer={(updated) => {
+                  setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+                  setSelectedCustomer(updated);
+                }}
               />
             )}
           </main>
@@ -1440,6 +1444,10 @@ export const App: React.FC = () => {
           language={language}
           transactions={transactions}
           onClose={() => setReceiptModalData(null)}
+          onUpdateCustomer={(updated) => {
+            setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+            setReceiptModalData((prev) => (prev ? { ...prev, customer: updated } : null));
+          }}
         />
       )}
 

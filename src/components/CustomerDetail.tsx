@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Customer, Language, Shop, Transaction } from '../types';
 import { translations } from '../i18n/translations';
 import {
@@ -8,12 +8,24 @@ import {
   MinusCircle,
   Clock,
   Send,
-  Calendar
+  Calendar,
+  MessageCircle,
+  Download,
+  MapPin,
+  Check,
+  AlertCircle,
+  X,
+  Edit3,
+  CheckCircle2,
+  FileText
 } from 'lucide-react';
 
 import { formatShopCurrency } from '../lib/countryPricing';
 import { unpackReceiptNote } from '../lib/receiptUtils';
 import { printCustomerStatementPDF } from '../lib/pdfGenerator';
+import { dispatchWhatsApp, generateVCard, validateCustomerPhone } from '../lib/whatsappService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { CountryPhoneInput } from './CountryPhoneInput';
 
 interface Props {
   customer: Customer;
@@ -23,6 +35,7 @@ interface Props {
   onBack: () => void;
   onOpenAddTx: (type?: 'credit_given' | 'payment_received') => void;
   onSelectReceiptTx: (tx: Transaction) => void;
+  onUpdateCustomer?: (updated: Customer) => void;
 }
 
 export const CustomerDetail: React.FC<Props> = ({
@@ -33,10 +46,124 @@ export const CustomerDetail: React.FC<Props> = ({
   onBack,
   onOpenAddTx,
   onSelectReceiptTx,
+  onUpdateCustomer,
 }) => {
   const t = translations[language];
   const balance = customer.balance || 0;
   const owesMoney = balance > 0;
+
+  // Toast / Status Message State
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
+
+  // Phone Edit / Add Modal State
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
+  const [editedPhone, setEditedPhone] = useState(customer.phone_number || '');
+  const [isSavingPhone, setIsSavingPhone] = useState(false);
+
+  // Validate phone presence
+  const phoneValidation = validateCustomerPhone(customer.phone_number, shop?.country || 'IN', language);
+  const hasValidPhone = phoneValidation.isValid;
+
+  const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToastMsg(msg);
+    setToastType(type);
+    setTimeout(() => setToastMsg(null), 4000);
+  };
+
+  // Direct WhatsApp Chat Handoff
+  const handleOpenWhatsAppChat = async () => {
+    if (!hasValidPhone) {
+      setIsPhoneModalOpen(true);
+      return;
+    }
+
+    const res = await dispatchWhatsApp({
+      type: 'CUSTOMER_GREETING',
+      customer,
+      shop,
+      language,
+    });
+
+    if (res.success) {
+      showToast(res.statusMessage, 'success');
+    } else {
+      showToast(res.statusMessage || t.missing_phone_notice, 'error');
+    }
+  };
+
+  // Direct Due Reminder WhatsApp Handoff
+  const handleSendDueReminder = async () => {
+    if (!hasValidPhone) {
+      setIsPhoneModalOpen(true);
+      return;
+    }
+
+    const res = await dispatchWhatsApp({
+      type: 'DUE_REMINDER',
+      customer,
+      shop,
+      dueAmount: balance,
+      language,
+    });
+
+    if (res.success) {
+      showToast(res.statusMessage, 'success');
+    } else {
+      showToast(res.statusMessage || t.missing_phone_notice, 'error');
+    }
+  };
+
+  // Contact Export to .vcf vCard
+  const handleSaveContact = () => {
+    generateVCard(customer, shop);
+    showToast(t.contact_saved_notice, 'success');
+  };
+
+  // Save / Update Phone Number to Supabase
+  const handleSavePhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = editedPhone.trim();
+    if (!trimmed) {
+      showToast(t.enter_customer_phone, 'error');
+      return;
+    }
+
+    setIsSavingPhone(true);
+    const updatedCustomer: Customer = {
+      ...customer,
+      phone_number: trimmed,
+    };
+
+    if (isSupabaseConfigured && supabase && !customer.id.startsWith('cust-') && !customer.id.startsWith('temp-')) {
+      try {
+        const { error } = await supabase
+          .from('customers')
+          .update({ phone_number: trimmed })
+          .eq('id', customer.id);
+
+        if (error) {
+          console.error('[CUSTOMER-UPDATE] Failed to update phone in DB:', error);
+          showToast(error.message, 'error');
+          setIsSavingPhone(false);
+          return;
+        }
+      } catch (err: any) {
+        console.error('[CUSTOMER-UPDATE] DB update exception:', err);
+        showToast(err.message, 'error');
+        setIsSavingPhone(false);
+        return;
+      }
+    }
+
+    if (onUpdateCustomer) {
+      onUpdateCustomer(updatedCustomer);
+    }
+
+    setIsSavingPhone(false);
+    setIsPhoneModalOpen(false);
+    showToast(t.customer_phone_updated, 'success');
+  };
 
   // Format date helper
   const formatDate = (isoStr: string) => {
@@ -53,34 +180,131 @@ export const CustomerDetail: React.FC<Props> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col max-w-md mx-auto">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col max-w-md mx-auto transition-colors">
       {/* Header */}
-      <div className="bg-slate-900 text-white p-4 sticky top-0 z-20 shadow-md">
+      <div className="bg-slate-900 dark:bg-slate-950 text-white p-4 sticky top-0 z-20 shadow-md border-b border-slate-800">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2.5 min-w-0 flex-1 pr-2">
             <button
               onClick={onBack}
               className="p-1.5 rounded-full hover:bg-white/10 transition-colors shrink-0"
+              aria-label="Back"
             >
               <ArrowLeft className="w-6 h-6" />
             </button>
             <div className="min-w-0 flex-1">
-              <h1 className="font-extrabold text-base sm:text-lg leading-tight truncate">{customer.display_label}</h1>
+              <h1 className="font-extrabold text-base sm:text-lg leading-tight truncate">{customer.display_label || customer.name}</h1>
               <p className="text-xs text-slate-400 flex items-center mt-0.5 truncate">
                 <Phone className="w-3 h-3 mr-1 shrink-0" />
-                <span className="truncate">{customer.phone_number}</span>
+                <span className="truncate">{customer.phone_number || t.missing_phone_notice}</span>
               </p>
             </div>
           </div>
 
-          <button
-            onClick={() => printCustomerStatementPDF(customer, transactions, shop, language)}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center space-x-1 transition-colors shrink-0"
-          >
-            <span>PDF</span>
-          </button>
+          <div className="flex items-center space-x-1.5 shrink-0">
+            <button
+              onClick={() => printCustomerStatementPDF(customer, transactions, shop, language)}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center space-x-1 transition-colors"
+              title="Download Statement PDF"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>PDF</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Customer Address & GSTIN Display (Phase 11 Requirement) */}
+        {(customer.address || customer.gstin) && (
+          <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] text-slate-300 space-y-0.5">
+            {customer.address && (
+              <div className="flex items-center space-x-1 truncate">
+                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                <span className="truncate">{customer.address}</span>
+              </div>
+            )}
+            {customer.gstin && (
+              <div className="font-mono text-[10px] text-blue-300 font-bold">
+                GSTIN: {customer.gstin}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* WhatsApp & Contact Action Strip */}
+        <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center gap-2 flex-wrap">
+          {hasValidPhone ? (
+            <>
+              {/* Direct WhatsApp Chat */}
+              <button
+                type="button"
+                onClick={handleOpenWhatsAppChat}
+                className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-emerald-600/20 flex items-center justify-center space-x-1.5 transition-all active:scale-[0.98] min-w-0"
+              >
+                <MessageCircle className="w-4 h-4 fill-current shrink-0" />
+                <span className="truncate">{t.whatsapp_chat}</span>
+              </button>
+
+              {/* Optional Save Contact vCard */}
+              <button
+                type="button"
+                onClick={handleSaveContact}
+                className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-extrabold text-xs rounded-xl border border-slate-700 flex items-center justify-center space-x-1.5 transition-colors shrink-0"
+                title="Download contact vCard file (.vcf)"
+              >
+                <Download className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{t.save_contact}</span>
+              </button>
+            </>
+          ) : (
+            /* Add Mobile Number CTA */
+            <button
+              type="button"
+              onClick={() => setIsPhoneModalOpen(true)}
+              className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all"
+            >
+              <Phone className="w-4 h-4 shrink-0" />
+              <span>{t.add_mobile_number}</span>
+            </button>
+          )}
+
+          {/* Quick Edit Phone Button */}
+          {hasValidPhone && (
+            <button
+              type="button"
+              onClick={() => setIsPhoneModalOpen(true)}
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-xl border border-slate-700 shrink-0"
+              title={t.update_phone}
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Toast Alert Banner */}
+      {toastMsg && (
+        <div
+          className={`px-4 py-2.5 text-xs font-bold flex items-center justify-between animate-in fade-in transition-all ${
+            toastType === 'success'
+              ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-200 border-b border-emerald-300 dark:border-emerald-800'
+              : toastType === 'error'
+              ? 'bg-rose-100 dark:bg-rose-950 text-rose-900 dark:text-rose-200 border-b border-rose-300 dark:border-rose-800'
+              : 'bg-blue-100 dark:bg-blue-950 text-blue-900 dark:text-blue-200 border-b border-blue-300 dark:border-blue-800'
+          }`}
+        >
+          <div className="flex items-center space-x-2">
+            {toastType === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+            )}
+            <span>{toastMsg}</span>
+          </div>
+          <button onClick={() => setToastMsg(null)} className="p-1 hover:opacity-75">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="p-4 space-y-4 pb-20">
@@ -88,10 +312,10 @@ export const CustomerDetail: React.FC<Props> = ({
         <div
           className={`p-6 rounded-3xl text-center border-2 shadow-sm ${
             owesMoney
-              ? 'bg-red-50 border-red-200 text-red-900'
+              ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900/60 text-red-900 dark:text-red-100'
               : balance === 0
-              ? 'bg-slate-100 border-slate-200 text-slate-800'
-              : 'bg-green-50 border-green-200 text-green-900'
+              ? 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200'
+              : 'bg-green-50 dark:bg-green-950/40 border-green-200 dark:border-green-900/60 text-green-900 dark:text-green-100'
           }`}
         >
           <div className="text-xs uppercase font-extrabold tracking-wider opacity-80 mb-1">
@@ -103,19 +327,33 @@ export const CustomerDetail: React.FC<Props> = ({
           <div
             className={`mt-2 inline-block px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
               owesMoney
-                ? 'bg-red-200 text-red-800'
+                ? 'bg-red-200 dark:bg-red-900/80 text-red-800 dark:text-red-200'
                 : balance === 0
-                ? 'bg-slate-200 text-slate-700'
-                : 'bg-green-200 text-green-800'
+                ? 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                : 'bg-green-200 dark:bg-green-900/80 text-green-800 dark:text-green-200'
             }`}
           >
             {owesMoney ? t.owe_money : balance === 0 ? t.all_settled : t.paid_up}
           </div>
+
+          {/* Dedicated WhatsApp Due Reminder Button (Phase 8 Requirement) */}
+          {owesMoney && (
+            <div className="mt-4 pt-3 border-t border-red-200/80 dark:border-red-900/60">
+              <button
+                type="button"
+                onClick={handleSendDueReminder}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md flex items-center justify-center space-x-2 transition-all active:scale-[0.98]"
+              >
+                <MessageCircle className="w-4 h-4 fill-current shrink-0" />
+                <span>{t.send_due_reminder}</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* AI Recovery Insight Card */}
         {owesMoney && (
-          <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:bg-slate-800/80 p-4 rounded-3xl border border-purple-200 dark:border-purple-800/60 shadow-xs space-y-1.5">
+          <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:bg-slate-900 p-4 rounded-3xl border border-purple-200 dark:border-purple-800/60 shadow-xs space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] uppercase font-black text-purple-700 dark:text-purple-300 flex items-center">
                 <span className="mr-1">🧠</span> AI Recovery Insight
@@ -132,7 +370,7 @@ export const CustomerDetail: React.FC<Props> = ({
           </div>
         )}
 
-        {/* Quick Action Buttons */}
+        {/* Quick Transaction Action Buttons */}
         <div className="grid grid-cols-2 gap-2.5">
           <button
             onClick={() => onOpenAddTx('credit_given')}
@@ -152,8 +390,8 @@ export const CustomerDetail: React.FC<Props> = ({
         </div>
 
         {/* Transaction History Section */}
-        <div className="bg-white rounded-3xl p-4 shadow-sm border border-slate-200">
-          <div className="flex items-center space-x-2 text-slate-800 font-extrabold text-base mb-4 border-b border-slate-100 pb-3">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 shadow-sm border border-slate-200 dark:border-slate-800">
+          <div className="flex items-center space-x-2 text-slate-800 dark:text-slate-200 font-extrabold text-base mb-4 border-b border-slate-100 dark:border-slate-800 pb-3">
             <Clock className="w-5 h-5 text-blue-600 shrink-0" />
             <span>{t.transaction_history}</span>
           </div>
@@ -204,7 +442,7 @@ export const CustomerDetail: React.FC<Props> = ({
                     <div className="text-right flex flex-col items-end space-y-2 shrink-0">
                       <div
                         className={`text-base sm:text-lg font-black ${
-                          isCredit ? 'text-red-600' : 'text-green-600'
+                          isCredit ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
                         }`}
                       >
                         {isCredit ? '-' : '+'}{formatShopCurrency(Number(tx.amount), shop?.country, shop?.currency_code)}
@@ -212,9 +450,10 @@ export const CustomerDetail: React.FC<Props> = ({
 
                       <button
                         onClick={() => onSelectReceiptTx(tx)}
-                        className="inline-flex items-center space-x-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 hover:bg-emerald-100 transition-colors shrink-0"
+                        className="inline-flex items-center space-x-1 text-xs font-extrabold text-emerald-600 hover:text-emerald-700 hover:underline"
+                        title={t.send_whatsapp}
                       >
-                        <Send className="w-3 h-3 shrink-0" />
+                        <MessageCircle className="w-3.5 h-3.5 fill-current" />
                         <span>{t.send_again}</span>
                       </button>
                     </div>
@@ -225,6 +464,56 @@ export const CustomerDetail: React.FC<Props> = ({
           )}
         </div>
       </div>
+
+      {/* Edit / Add Phone Number Modal */}
+      {isPhoneModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-3xl max-w-sm w-full p-6 space-y-4 border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="font-extrabold text-base flex items-center">
+                <Phone className="w-4 h-4 mr-2 text-blue-600" />
+                <span>{customer.phone_number ? t.update_phone : t.add_mobile_number}</span>
+              </h3>
+              <button
+                onClick={() => setIsPhoneModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-full"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePhone} className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1.5">
+                  {t.customer_phone} <span className="text-rose-500">*</span>
+                </label>
+                <CountryPhoneInput
+                  language={language}
+                  value={editedPhone}
+                  onChange={(e164) => setEditedPhone(e164)}
+                />
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPhoneModalOpen(false)}
+                  className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  {t.back}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPhone}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center space-x-1 disabled:opacity-50"
+                >
+                  <span>{t.save_profile}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
