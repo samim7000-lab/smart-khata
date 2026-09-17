@@ -2,17 +2,39 @@ import { TransactionType } from '../types';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { parseIndicAmount } from './indicNumerals';
 
+export interface GeminiOcrItem {
+  name: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+}
+
+export interface GeminiOcrDraft {
+  id: string;
+  customerName: string;
+  phone: string;
+  amount: number;
+  type: TransactionType | 'unknown';
+  optionalItems?: GeminiOcrItem[];
+  optionalNote?: string;
+  confidence: number;
+}
+
 export interface GeminiOcrResult {
   isValidLedger: boolean;
   status: 'success' | 'uncertain' | 'unreadable';
   reasonIfInvalid?: string;
   customerName: string;
+  phone?: string;
   amount: number;
   type: TransactionType | 'unknown';
   confidence: number;
   currency?: string;
   rawText?: string;
   notes?: string;
+  optionalItems?: GeminiOcrItem[];
+  optionalNote?: string;
+  drafts?: GeminiOcrDraft[];
   resolvedModel?: string;
   error?: string;
 }
@@ -91,17 +113,41 @@ export const analyzeHandwrittenLedger = async (
           txType = 'credit_given';
         }
 
+        const drafts: GeminiOcrDraft[] = Array.isArray(data.drafts)
+          ? data.drafts.map((d: any, idx: number) => {
+              const dAmtParsed = parseIndicAmount(d.amount);
+              const dCleanAmt = dAmtParsed.isValid ? dAmtParsed.amount : (Number(d.amount) || 0);
+              let dType: TransactionType | 'unknown' = 'unknown';
+              if (d.transaction_type === 'payment_received' || d.type === 'payment_received') dType = 'payment_received';
+              else if (d.transaction_type === 'credit_given' || d.type === 'credit_given') dType = 'credit_given';
+              return {
+                id: d.id || `draft-${idx + 1}`,
+                customerName: String(d.customer_name || '').trim(),
+                phone: String(d.phone || '').trim(),
+                amount: dCleanAmt,
+                type: dType,
+                optionalItems: Array.isArray(d.optional_items) ? d.optional_items : [],
+                optionalNote: String(d.optional_note || '').trim(),
+                confidence: Number(d.confidence) || 0.85,
+              };
+            })
+          : [];
+
         return {
           isValidLedger: isValid,
           status: rawStatus,
           reasonIfInvalid: data.reason_if_invalid || (isValid ? '' : 'This image does not contain a clear handwritten ledger or bill entry.'),
           customerName: isValid ? String(data.customer_name || '').trim() : '',
+          phone: isValid ? String(data.phone || '').trim() : '',
           amount: cleanAmount,
           type: txType,
           confidence: Number(data.confidence) || (isValid ? 0.85 : 0),
           currency: data.currency || 'INR',
           rawText: data.raw_text || '',
           notes: data.notes || '',
+          optionalItems: Array.isArray(data.optional_items) ? data.optional_items : [],
+          optionalNote: String(data.optional_note || '').trim(),
+          drafts: drafts,
           resolvedModel: data.resolved_model || 'gemini-3.6-flash',
           error: data.error,
         };

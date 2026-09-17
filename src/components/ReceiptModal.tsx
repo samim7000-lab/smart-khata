@@ -34,6 +34,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { getLedgerPhotoSignedUrl } from '../lib/imageUtils';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { WhatsAppExperimentLabModal } from './WhatsAppExperimentLabModal';
+import { saveReceiptImageToDevice } from '../native/mediaSaver';
 
 interface Props {
   transaction: Transaction;
@@ -287,19 +288,20 @@ export const ReceiptModal: React.FC<Props> = ({
   const handleDownloadImage = async () => {
     setIsGenerating(true);
     const file = await generateCanvasFile();
+    if (!file) {
+      setIsGenerating(false);
+      return;
+    }
+
+    const res = await saveReceiptImageToDevice(file, file.name);
     setIsGenerating(false);
 
-    if (!file) return;
-
-    const url = URL.createObjectURL(file);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = file.name;
-    link.click();
-    URL.revokeObjectURL(url);
-
-    setToastMsg('✅ Receipt Image downloaded successfully!');
-    setTimeout(() => setToastMsg(''), 3000);
+    if (res.success) {
+      setToastMsg(`✅ ${res.message}`);
+    } else {
+      setToastMsg(`⚠️ ${res.message}`);
+    }
+    setTimeout(() => setToastMsg(''), 3500);
   };
 
   const handleCopyText = () => {

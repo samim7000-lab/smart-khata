@@ -153,14 +153,17 @@ serve(async (req) => {
     const strictExtractionPrompt = `You are a strict financial data extractor for handwritten khata books, paper receipts, cash memos, and ledger notebooks in Bengali (Bangla), Hindi (Devanagari), and English.
 
 Step 1: Check if the photo is a valid ledger page, bill, notebook entry, or receipt.
-If it is a selfie, face, landscape, blank paper, unrelated object, animal, vehicle, or contains NO financial/ledger entries, set "is_valid_ledger": false, "status": "unreadable", and provide a clear "reason_if_invalid". Set customer_name to "" and amount to 0.
+If it is a selfie, face, landscape, blank paper, unrelated object, animal, vehicle, or contains NO financial/ledger entries, set "is_valid_ledger": false, "status": "unreadable", and provide a clear "reason_if_invalid". Set customer_name to "", phone to "", and amount to 0.
 
 Step 2: If valid:
 - Extract the customer name written on the entry. If unreadable, return "". NEVER invent names.
+- Extract any customer mobile/phone number if written. Return only the cleaned digits. If no phone number is explicitly written on the paper, return "". NEVER INVENT OR GUESS A PHONE NUMBER.
 - Extract the numerical amount. Carefully interpret Bengali numerals (০, ১, ২, ৩, ৪, ৫, ৬, ৭, ৮, ৯), Hindi numerals (०, १, २, ३, ४, ५, ६, ৭, ৮, ९), or English digits. If ambiguous, set amount to 0 and status to "uncertain".
 - Determine transaction type: "credit_given" if credit/due/baki/দেনা/বাকি/উধার/खाता, "payment_received" if payment/received/cash/জমা/পরিশোধ/নগদ/जमा/भुगतान, or "unknown".
-- Provide confidence (0.0 to 1.0).
-- If multiple entries exist, extract the primary/latest line entry.
+- If itemized rows exist (e.g. goods bought, quantity, price), extract them into "optional_items" array: [{ "name": string, "quantity": number, "unit_price": number, "total": number }].
+- If any memo or note is written, extract into "optional_note".
+- Provide confidence score (0.0 to 1.0).
+- If multiple entries exist on this ledger sheet, extract all individual entries into the "drafts" array, where each entry has { "customer_name": string, "phone": string, "amount": number, "transaction_type": "credit_given" | "payment_received" | "unknown", "optional_items": Array, "optional_note": string, "confidence": number }. Populate the top-level customer_name, phone, amount, etc. with the primary/first entry.
 
 Return STRICT JSON matching this schema:
 {
@@ -168,11 +171,23 @@ Return STRICT JSON matching this schema:
   "status": "success" | "uncertain" | "unreadable",
   "reason_if_invalid": string,
   "customer_name": string,
+  "phone": string,
   "amount": number,
   "transaction_type": "credit_given" | "payment_received" | "unknown",
+  "optional_items": Array<{ "name": string, "quantity": number, "unit_price": number, "total": number }>,
+  "optional_note": string,
   "currency": string,
   "confidence": number,
-  "raw_text": string
+  "raw_text": string,
+  "drafts": Array<{
+    "customer_name": string,
+    "phone": string,
+    "amount": number,
+    "transaction_type": "credit_given" | "payment_received" | "unknown",
+    "optional_items": Array<{ "name": string, "quantity": number, "unit_price": number, "total": number }>,
+    "optional_note": string,
+    "confidence": number
+  }>
 }`;
 
     // 6. EXECUTE GENERATE CONTENT WITH BOUNDED RETRY & EXPONENTIAL BACKOFF
@@ -268,15 +283,48 @@ Return STRICT JSON matching this schema:
     const rawStatus = parsed.status || (isValid ? 'success' : 'unreadable');
     const status = ['success', 'uncertain', 'unreadable'].includes(rawStatus) ? rawStatus : (isValid ? 'success' : 'unreadable');
     
-    // Normalize transaction type to application canonical types
-    let txType: 'credit_given' | 'payment_received' | 'unknown' = 'unknown';
-    if (parsed.transaction_type === 'payment_received' || parsed.type === 'payment') {
-      txType = 'payment_received';
-    } else if (parsed.transaction_type === 'credit_given' || parsed.type === 'credit') {
-      txType = 'credit_given';
-    }
+    const normalizeType = (raw: string): 'credit_given' | 'payment_received' | 'unknown' => {
+      if (raw === 'payment_received' || raw === 'payment') return 'payment_received';
+      if (raw === 'credit_given' || raw === 'credit') return 'credit_given';
+      return 'unknown';
+    };
 
+    const cleanPhone = (val: any): string => {
+      if (!val) return '';
+      const digits = String(val).replace(/\D/g, '');
+      return (digits.length >= 8 && digits.length <= 15) ? digits : '';
+    };
+
+    const cleanItems = (items: any): Array<{ name: string; quantity: number; unit_price: number; total: number }> => {
+      if (!Array.isArray(items)) return [];
+      return items.map((it: any) => ({
+        name: String(it?.name || '').trim(),
+        quantity: Number(it?.quantity) || 1,
+        unit_price: Number(it?.unit_price) || 0,
+        total: Number(it?.total) || 0,
+      })).filter((it) => it.name.length > 0 || it.total > 0);
+    };
+
+    const txType = normalizeType(parsed.transaction_type || parsed.type);
     const cleanAmount = Number(parsed.amount) || 0;
+    const phone = isValid ? cleanPhone(parsed.phone) : '';
+    const optionalItems = isValid ? cleanItems(parsed.optional_items) : [];
+    const optionalNote = isValid ? String(parsed.optional_note || '').trim() : '';
+
+    // Sanitize multi-entry drafts
+    let sanitizedDrafts: any[] = [];
+    if (isValid && Array.isArray(parsed.drafts) && parsed.drafts.length > 0) {
+      sanitizedDrafts = parsed.drafts.map((d: any, idx: number) => ({
+        id: `draft-${idx + 1}-${Date.now()}`,
+        customer_name: String(d.customer_name || '').trim(),
+        phone: cleanPhone(d.phone),
+        amount: Number(d.amount) || 0,
+        transaction_type: normalizeType(d.transaction_type || d.type),
+        optional_items: cleanItems(d.optional_items),
+        optional_note: String(d.optional_note || '').trim(),
+        confidence: Number(d.confidence) || 0.85,
+      })).filter((d: any) => d.customer_name.length > 0 || d.amount > 0);
+    }
 
     return new Response(
       JSON.stringify({
@@ -284,12 +332,16 @@ Return STRICT JSON matching this schema:
         status: status,
         reason_if_invalid: reason,
         customer_name: isValid ? String(parsed.customer_name || '').trim() : '',
+        phone: phone,
         amount: isValid ? cleanAmount : 0,
         type: txType,
         transaction_type: txType,
+        optional_items: optionalItems,
+        optional_note: optionalNote,
         currency: parsed.currency || 'INR',
         confidence: Number(parsed.confidence) || (isValid ? 0.9 : 0),
         raw_text: parsed.raw_text || '',
+        drafts: sanitizedDrafts,
         resolved_model: activeModelIdentifier,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

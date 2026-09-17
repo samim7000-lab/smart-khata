@@ -2,14 +2,19 @@ package com.smartkhata.app;
 
 import android.app.Activity;
 import android.content.ComponentName;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.media.MediaScannerConnection;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.util.Base64;
 import android.util.Log;
 
@@ -24,6 +29,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.util.List;
 
@@ -328,6 +334,90 @@ public class WhatsAppIntentPlugin extends Plugin {
             telemetry.put("executionTimeMs", elapsed);
             telemetry.put("error", ex.getClass().getSimpleName() + ": " + ex.getMessage());
             call.resolve(telemetry);
+        }
+    }
+
+    /**
+     * NATIVE RECEIPT GALLERY SAVER
+     * Saves the generated receipt image directly into user-accessible Android Gallery / Photos
+     * under Pictures/SmartKhata via Android Scoped Storage (MediaStore).
+     * Zero dangerous storage permissions required on Android 10+ (API 29-36).
+     */
+    @PluginMethod
+    public void saveImageToGallery(PluginCall call) {
+        String imageBase64 = call.getString("imageBase64", null);
+        String fileName = call.getString("fileName", "SmartKhata_Receipt_" + System.currentTimeMillis() + ".png");
+
+        if (imageBase64 == null || imageBase64.isEmpty()) {
+            call.reject("Image data (imageBase64) is required");
+            return;
+        }
+
+        Context context = getContext();
+        if (context == null) {
+            call.reject("Android Context is null");
+            return;
+        }
+
+        try {
+            // Strip data:image/png;base64, prefix if present
+            String cleanBase64 = imageBase64;
+            if (cleanBase64.contains(";base64,")) {
+                cleanBase64 = cleanBase64.split(";base64,")[1];
+            }
+            byte[] decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT);
+
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/SmartKhata");
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            }
+
+            Uri uri = context.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) {
+                call.reject("Failed to create MediaStore image entry");
+                return;
+            }
+
+            try (OutputStream os = context.getContentResolver().openOutputStream(uri)) {
+                if (os == null) {
+                    call.reject("Failed to open output stream for MediaStore URI");
+                    return;
+                }
+                os.write(decodedBytes);
+                os.flush();
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear();
+                values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                context.getContentResolver().update(uri, values, null, null);
+            }
+
+            // Explicit MediaScanner trigger so images show immediately in Google Photos / Gallery
+            try {
+                MediaScannerConnection.scanFile(
+                    context,
+                    new String[]{uri.toString()},
+                    new String[]{"image/png"},
+                    null
+                );
+            } catch (Exception ignored) {}
+
+            JSObject result = new JSObject();
+            result.put("success", true);
+            result.put("uri", uri.toString());
+            result.put("fileName", fileName);
+            result.put("folder", "Pictures/SmartKhata");
+            Log.i(TAG, "Receipt image saved to Gallery successfully: " + uri.toString());
+            call.resolve(result);
+
+        } catch (Exception ex) {
+            Log.e(TAG, "Error saving receipt image to Gallery", ex);
+            call.reject("Error saving image to Gallery: " + ex.getMessage());
         }
     }
 }

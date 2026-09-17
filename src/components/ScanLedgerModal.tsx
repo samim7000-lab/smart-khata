@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Customer, Language, Shop, TransactionType } from '../types';
 import { translations } from '../i18n/translations';
-import { analyzeHandwrittenLedger, GeminiOcrResult } from '../lib/geminiUtils';
+import { analyzeHandwrittenLedger, GeminiOcrResult, GeminiOcrItem, GeminiOcrDraft } from '../lib/geminiUtils';
 import { resolveCurrencySymbol, formatShopCurrency } from '../lib/countryPricing';
 import { validateImageFile, compressImage, uploadLedgerPhotoProof } from '../lib/imageUtils';
 import { parseIndicAmount } from '../lib/indicNumerals';
@@ -19,7 +19,12 @@ import {
   Loader2,
   FileImage,
   RefreshCw,
-  Calculator
+  Calculator,
+  Phone,
+  Check,
+  Layers,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface Props {
@@ -35,6 +40,26 @@ interface Props {
     ledgerPhotoUrl?: string,
     newCustomerData?: { name: string; phone: string; displayLabel: string }
   ) => void;
+}
+
+export type BadgeState = 'detected' | 'check' | 'manual';
+
+export interface ScanDraft {
+  id: string;
+  customerName: string;
+  phone: string;
+  amount: string;
+  type: TransactionType;
+  optionalItems: GeminiOcrItem[];
+  optionalNote: string;
+  confidence: number;
+  matchedCustomer: Customer | null;
+  isCreatingNewCust: boolean;
+  ambiguousCandidates: Customer[];
+  nameBadge: BadgeState;
+  phoneBadge: BadgeState;
+  amountBadge: BadgeState;
+  confirmed: boolean;
 }
 
 export const ScanLedgerModal: React.FC<Props> = ({
@@ -53,26 +78,119 @@ export const ScanLedgerModal: React.FC<Props> = ({
   const [inputError, setInputError] = useState<string | null>(null);
   const [ocrResult, setOcrResult] = useState<GeminiOcrResult | null>(null);
 
-  // Editable Form State
-  const [editedName, setEditedName] = useState('');
-  const [editedAmount, setEditedAmount] = useState('');
-  const [editedType, setEditedType] = useState<TransactionType>('credit_given');
-  const [note, setNote] = useState('');
-
-  // Selected Customer Matching State
-  const [matchedCustomer, setMatchedCustomer] = useState<Customer | null>(null);
-  const [isCreatingNewCust, setIsCreatingNewCust] = useState(false);
-  const [newCustPhone, setNewCustPhone] = useState('');
+  // Multi-entry / Bulk-Scan Batch State
+  const [drafts, setDrafts] = useState<ScanDraft[]>([]);
+  const [activeDraftIndex, setActiveDraftIndex] = useState(0);
+  const [showOptionalDetails, setShowOptionalDetails] = useState(false);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Handle File Selection (Dual Camera & Gallery)
+  // Helper: Normalize phone to match last 10 digits
+  const normalizePhone = (p: string): string => {
+    if (!p) return '';
+    return p.replace(/\D/g, '').slice(-10);
+  };
+
+  // 1. Customer Matching Engine with Phone First & Ambiguity Guard
+  const findCustomerMatch = (
+    name: string,
+    phone: string,
+    custList: Customer[]
+  ): { match: Customer | null; candidates: Customer[]; isAmbiguous: boolean } => {
+    const normPhone = normalizePhone(phone);
+    if (normPhone.length >= 10) {
+      const phoneMatch = custList.find((c) => normalizePhone(c.phone_number) === normPhone);
+      if (phoneMatch) {
+        return { match: phoneMatch, candidates: [], isAmbiguous: false };
+      }
+    }
+
+    const trimmed = name.trim().toLowerCase();
+    if (!trimmed) {
+      return { match: null, candidates: [], isAmbiguous: false };
+    }
+
+    // Exact Match by name or display_label
+    const exact = custList.find(
+      (c) =>
+        c.name.toLowerCase() === trimmed ||
+        (c.display_label && c.display_label.toLowerCase() === trimmed)
+    );
+    if (exact) {
+      return { match: exact, candidates: [], isAmbiguous: false };
+    }
+
+    // Partial / Fuzzy Match
+    const fuzzy = custList.filter(
+      (c) =>
+        c.name.toLowerCase().includes(trimmed) ||
+        trimmed.includes(c.name.toLowerCase()) ||
+        (c.display_label && c.display_label.toLowerCase().includes(trimmed))
+    );
+
+    if (fuzzy.length === 1) {
+      return { match: fuzzy[0], candidates: [], isAmbiguous: false };
+    } else if (fuzzy.length > 1) {
+      return { match: null, candidates: fuzzy, isAmbiguous: true };
+    }
+
+    return { match: null, candidates: [], isAmbiguous: false };
+  };
+
+  // Helper: Initialize a draft card from OCR data
+  const createDraftFromData = (
+    id: string,
+    name: string,
+    phone: string,
+    amountNum: number,
+    txType: TransactionType | 'unknown',
+    items: GeminiOcrItem[] = [],
+    memo: string = '',
+    confidence: number = 0.9
+  ): ScanDraft => {
+    const cleanName = name.trim();
+    const cleanPhone = phone.trim();
+    const matchResult = findCustomerMatch(cleanName, cleanPhone, customers);
+
+    const nameBadge: BadgeState = cleanName
+      ? confidence >= 0.8 ? 'detected' : 'check'
+      : 'manual';
+
+    const phoneBadge: BadgeState = cleanPhone
+      ? confidence >= 0.8 ? 'detected' : 'check'
+      : matchResult.match?.phone_number ? 'detected' : 'manual';
+
+    const amountBadge: BadgeState = amountNum > 0
+      ? confidence >= 0.8 ? 'detected' : 'check'
+      : 'manual';
+
+    const resolvedPhone = cleanPhone || (matchResult.match?.phone_number || '');
+
+    return {
+      id,
+      customerName: cleanName || (matchResult.match?.name || ''),
+      phone: resolvedPhone,
+      amount: amountNum > 0 ? String(amountNum) : '',
+      type: txType === 'payment_received' ? 'payment_received' : 'credit_given',
+      optionalItems: items,
+      optionalNote: memo,
+      confidence,
+      matchedCustomer: matchResult.match,
+      isCreatingNewCust: !matchResult.match && Boolean(cleanName),
+      ambiguousCandidates: matchResult.candidates,
+      nameBadge,
+      phoneBadge,
+      amountBadge,
+      confirmed: false,
+    };
+  };
+
+  // 2. Handle File Selection (Dual Camera & Gallery)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Reset input value so re-selecting same file works
     e.target.value = '';
     await processSelectedFile(file);
   };
@@ -80,7 +198,6 @@ export const ScanLedgerModal: React.FC<Props> = ({
   const processSelectedFile = async (file: File) => {
     setInputError(null);
 
-    // Client-side validation
     const validation = validateImageFile(file);
     if (!validation.valid) {
       setInputError(validation.error || 'Please select a valid image file (JPEG, PNG, or WebP).');
@@ -89,7 +206,6 @@ export const ScanLedgerModal: React.FC<Props> = ({
 
     setAnalyzing(true);
     try {
-      // Client-side compression to ~250KB JPEG to protect mobile network and prevent base64 bloat
       const compressedDataUrl = await compressImage(file, 1200, 1200, 0.82);
       setImagePreview(compressedDataUrl);
       await runOcr(compressedDataUrl);
@@ -100,19 +216,46 @@ export const ScanLedgerModal: React.FC<Props> = ({
     }
   };
 
-  // 2. Run Gemini AI OCR via Real Edge Function Only
+  // 3. Run Gemini AI OCR via Real Edge Function Only
   const runOcr = async (base64Img: string) => {
     setAnalyzing(true);
     setOcrResult(null);
+    setDrafts([]);
+    setActiveDraftIndex(0);
+
     try {
       const res = await analyzeHandwrittenLedger(base64Img, 30000, shop.id);
       setOcrResult(res);
+
       if (res.isValidLedger && !res.error) {
-        setEditedName(res.customerName || '');
-        setEditedAmount(res.amount ? String(res.amount) : '');
-        setEditedType(res.type === 'payment_received' ? 'payment_received' : 'credit_given');
-        if (res.customerName) {
-          autoMatchCustomer(res.customerName);
+        // Multi-entry vs single entry detection
+        if (res.drafts && res.drafts.length > 1) {
+          const generatedDrafts: ScanDraft[] = res.drafts.map((d: GeminiOcrDraft, idx: number) =>
+            createDraftFromData(
+              d.id || `draft-${idx + 1}`,
+              d.customerName,
+              d.phone,
+              d.amount,
+              d.type,
+              d.optionalItems || [],
+              d.optionalNote || '',
+              d.confidence
+            )
+          );
+          setDrafts(generatedDrafts);
+        } else {
+          // Single draft
+          const singleDraft = createDraftFromData(
+            'draft-1',
+            res.customerName,
+            res.phone || '',
+            res.amount,
+            res.type,
+            res.optionalItems || [],
+            res.optionalNote || '',
+            res.confidence
+          );
+          setDrafts([singleDraft]);
         }
       }
     } catch (err: any) {
@@ -132,107 +275,162 @@ export const ScanLedgerModal: React.FC<Props> = ({
     }
   };
 
-  // 3. Customer Matching Engine
-  const autoMatchCustomer = (detectedName: string) => {
-    if (!detectedName.trim()) {
-      setMatchedCustomer(null);
-      return;
-    }
+  // Current Active Draft Accessor & Mutator
+  const activeDraft = drafts[activeDraftIndex] || null;
 
-    const trimmed = detectedName.trim().toLowerCase();
-    // Direct match by name or display_label
-    const directMatch = customers.find(
-      (c) =>
-        c.name.toLowerCase() === trimmed ||
-        (c.display_label && c.display_label.toLowerCase() === trimmed)
+  const updateActiveDraft = (updater: Partial<ScanDraft>) => {
+    setDrafts((prev) =>
+      prev.map((d, idx) => (idx === activeDraftIndex ? { ...d, ...updater } : d))
     );
-    if (directMatch) {
-      setMatchedCustomer(directMatch);
-      setIsCreatingNewCust(false);
-      return;
-    }
+  };
 
-    // Partial / Fuzzy match
-    const fuzzyMatches = customers.filter(
-      (c) =>
-        c.name.toLowerCase().includes(trimmed) ||
-        trimmed.includes(c.name.toLowerCase()) ||
-        (c.display_label && c.display_label.toLowerCase().includes(trimmed))
-    );
+  // Handlers for Active Draft Field Changes
+  const handleNameChange = (val: string) => {
+    if (!activeDraft) return;
+    const matchResult = findCustomerMatch(val, activeDraft.phone, customers);
+    updateActiveDraft({
+      customerName: val,
+      matchedCustomer: matchResult.match,
+      ambiguousCandidates: matchResult.candidates,
+      isCreatingNewCust: !matchResult.match && Boolean(val.trim()),
+      nameBadge: 'manual',
+    });
+  };
 
-    if (fuzzyMatches.length === 1) {
-      setMatchedCustomer(fuzzyMatches[0]);
-      setIsCreatingNewCust(false);
+  const handlePhoneChange = (val: string) => {
+    if (!activeDraft) return;
+    const matchResult = findCustomerMatch(activeDraft.customerName, val, customers);
+    updateActiveDraft({
+      phone: val,
+      matchedCustomer: matchResult.match || activeDraft.matchedCustomer,
+      ambiguousCandidates: matchResult.candidates,
+      phoneBadge: 'manual',
+    });
+  };
+
+  const handleAmountChange = (val: string) => {
+    updateActiveDraft({
+      amount: val,
+      amountBadge: 'manual',
+    });
+  };
+
+  const handleTypeChange = (type: TransactionType) => {
+    updateActiveDraft({ type });
+  };
+
+  const handleSelectCustomer = (customer: Customer | null) => {
+    if (!activeDraft) return;
+    if (customer) {
+      updateActiveDraft({
+        matchedCustomer: customer,
+        customerName: customer.display_label || customer.name,
+        phone: customer.phone_number || activeDraft.phone,
+        ambiguousCandidates: [],
+        isCreatingNewCust: false,
+      });
     } else {
-      setMatchedCustomer(null);
-      setIsCreatingNewCust(fuzzyMatches.length === 0);
+      updateActiveDraft({
+        matchedCustomer: null,
+        isCreatingNewCust: true,
+      });
     }
   };
 
-  const handleNameInputChange = (val: string) => {
-    setEditedName(val);
-    autoMatchCustomer(val);
-  };
-
-  // 4. Reset / Try Another Photo
+  // Reset / Try Another Photo
   const handleResetPhoto = () => {
     setImagePreview(null);
     setOcrResult(null);
     setInputError(null);
-    setEditedName('');
-    setEditedAmount('');
-    setMatchedCustomer(null);
-    setIsCreatingNewCust(false);
-    setNewCustPhone('');
+    setDrafts([]);
+    setActiveDraftIndex(0);
+    setShowOptionalDetails(false);
   };
 
-  // 5. Confirm & Save Handler (Explicit Merchant Action)
-  const handleConfirmSave = async () => {
-    const parsed = parseIndicAmount(editedAmount);
-    const numericAmount = parsed.isValid ? parsed.amount : 0;
-    if (numericAmount <= 0 || !editedName.trim() || !ocrResult?.isValidLedger || ocrResult?.error || uploading) return;
+  // Mandatory Validation Gate
+  // 1. Name is non-empty
+  // 2. Phone digits length >= 10
+  // 3. Amount > 0
+  // 4. Direction is selected
+  const activeAmountParsed = activeDraft ? parseIndicAmount(activeDraft.amount) : { amount: 0, isValid: false };
+  const hasValidName = Boolean(activeDraft && activeDraft.customerName.trim().length > 0);
+  const activePhoneDigits = activeDraft ? activeDraft.phone.replace(/\D/g, '') : '';
+  const hasValidPhone = activePhoneDigits.length >= 10;
+  const hasValidAmount = Boolean(activeAmountParsed.isValid && activeAmountParsed.amount > 0);
+  const isDraftSavable = Boolean(
+    activeDraft &&
+    hasValidName &&
+    hasValidPhone &&
+    hasValidAmount &&
+    !activeDraft.confirmed &&
+    !uploading
+  );
+
+  // Confirm & Save Active Draft
+  const handleConfirmActiveDraft = async () => {
+    if (!activeDraft || !isDraftSavable) return;
 
     setUploading(true);
     try {
-      // Upload compressed image proof to Supabase Storage CDN (never multi-MB Base64 in Postgres DB)
       let proofUrl = '';
       if (imagePreview) {
         proofUrl = await uploadLedgerPhotoProof(imagePreview, shop.id);
       }
 
-      const finalCustId = matchedCustomer?.id || `temp-${Date.now()}`;
+      const finalCustId = activeDraft.matchedCustomer?.id || `temp-${Date.now()}`;
       let newCustPayload: { name: string; phone: string; displayLabel: string } | undefined;
 
-      if (!matchedCustomer || isCreatingNewCust) {
+      if (!activeDraft.matchedCustomer || activeDraft.isCreatingNewCust) {
         newCustPayload = {
-          name: editedName.trim(),
-          phone: newCustPhone.trim(), // Strict: No hallucinated/random phone numbers!
-          displayLabel: editedName.trim(),
+          name: activeDraft.customerName.trim(),
+          phone: activeDraft.phone.trim(),
+          displayLabel: activeDraft.customerName.trim(),
         };
       }
 
+      const noteText = activeDraft.optionalNote.trim() || t.scan_ledger_title;
+
       onConfirmSave(
         finalCustId,
-        editedType,
-        numericAmount,
-        note.trim() || t.scan_ledger_title,
+        activeDraft.type,
+        activeAmountParsed.amount,
+        noteText,
         proofUrl || undefined,
         newCustPayload
       );
+
+      // Mark this draft as confirmed
+      updateActiveDraft({ confirmed: true });
+
+      // Check if there are unconfirmed drafts remaining
+      const nextUnconfirmedIdx = drafts.findIndex((d, i) => i > activeDraftIndex && !d.confirmed);
+      if (nextUnconfirmedIdx !== -1) {
+        setActiveDraftIndex(nextUnconfirmedIdx);
+      } else {
+        const anyUnconfirmed = drafts.find((d) => !d.confirmed);
+        if (!anyUnconfirmed) {
+          // All drafts confirmed!
+          onClose();
+        }
+      }
     } catch (err: any) {
       console.error('[SCAN] Confirm save error:', err);
-      // Fallback directly so user never loses their transaction
-      const finalCustId = matchedCustomer?.id || `temp-${Date.now()}`;
+      const finalCustId = activeDraft.matchedCustomer?.id || `temp-${Date.now()}`;
       onConfirmSave(
         finalCustId,
-        editedType,
-        numericAmount,
-        note.trim() || t.scan_ledger_title,
+        activeDraft.type,
+        activeAmountParsed.amount,
+        activeDraft.optionalNote.trim() || t.scan_ledger_title,
         undefined,
-        !matchedCustomer || isCreatingNewCust
-          ? { name: editedName.trim(), phone: newCustPhone.trim(), displayLabel: editedName.trim() }
+        !activeDraft.matchedCustomer || activeDraft.isCreatingNewCust
+          ? {
+              name: activeDraft.customerName.trim(),
+              phone: activeDraft.phone.trim(),
+              displayLabel: activeDraft.customerName.trim(),
+            }
           : undefined
       );
+      updateActiveDraft({ confirmed: true });
     } finally {
       setUploading(false);
     }
@@ -240,9 +438,33 @@ export const ScanLedgerModal: React.FC<Props> = ({
 
   const curr = resolveCurrencySymbol(shop?.country, shop?.currency_code);
 
+  const renderBadge = (badge: BadgeState, manualText = '! Enter manually') => {
+    if (badge === 'detected') {
+      return (
+        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+          <Check className="w-3 h-3" />
+          <span>✓ Detected</span>
+        </span>
+      );
+    }
+    if (badge === 'check') {
+      return (
+        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+          <AlertTriangle className="w-3 h-3" />
+          <span>⚠ Check this</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600">
+        <span>{manualText}</span>
+      </span>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200 my-auto border border-slate-200 dark:border-slate-800">
+      <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl max-w-lg w-full max-h-[94vh] flex flex-col shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200 my-auto border border-slate-200 dark:border-slate-800">
         {/* Modal Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-4 flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-2">
@@ -321,15 +543,16 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 />
               </div>
 
-              {/* Helpful Shopkeeper Guidance */}
+              {/* Shopkeeper Guidance */}
               <div className="bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
                 <div className="font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider text-[10px]">
                   💡 Tips for best scan accuracy:
                 </div>
                 <ul className="list-disc pl-4 space-y-0.5 font-medium">
                   <li>Hold camera steady under good room lighting.</li>
-                  <li>Ensure customer name and amount are clearly visible in the frame.</li>
-                  <li>Works with Bengali (১৫০০), Hindi (१५००), and English (1500) digits.</li>
+                  <li>Customer name, phone (if written), and amount will be extracted.</li>
+                  <li>Works with Bengali (১৫০০), Hindi (१५००), and English (1500) numbers.</li>
+                  <li>Multiple rows on one page can be reviewed individually.</li>
                 </ul>
               </div>
             </div>
@@ -362,7 +585,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
                   <span>Invalid Image or No Ledger Data Found</span>
                 </div>
                 <p className="text-xs font-semibold leading-relaxed text-amber-900 dark:text-amber-200">
-                  {ocrResult.reasonIfInvalid || ocrResult.error || "This image does not contain a valid ledger page or receipt."}
+                  {ocrResult.reasonIfInvalid || ocrResult.error || 'This image does not contain a valid ledger page or receipt.'}
                 </p>
                 <div className="text-[11px] font-medium text-amber-800 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-900/60 p-2.5 rounded-xl border border-amber-200 dark:border-amber-700">
                   💡 Tip: Please take a clearer, well-lit photo of a handwritten notebook entry, bill, or paper ledger page.
@@ -389,8 +612,8 @@ export const ScanLedgerModal: React.FC<Props> = ({
             </div>
           )}
 
-          {/* Step 4: Valid Extracted Data Review & Confirmation */}
-          {imagePreview && !analyzing && ocrResult && ocrResult.isValidLedger && !ocrResult.error && (
+          {/* Step 4: Extracted Data Review & Confirmation */}
+          {imagePreview && !analyzing && ocrResult && ocrResult.isValidLedger && !ocrResult.error && activeDraft && (
             <div className="space-y-4 animate-in fade-in">
               {/* Photo Proof & Retake Bar */}
               <div className="flex items-center justify-between p-2.5 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -420,27 +643,98 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 </button>
               </div>
 
-              {/* Large Text Detection Card */}
+              {/* Multi-Draft Batch Selector (If multiple entries exist) */}
+              {drafts.length > 1 && (
+                <div className="bg-indigo-50/80 dark:bg-indigo-950/40 p-3 rounded-2xl border border-indigo-200 dark:border-indigo-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-indigo-900 dark:text-indigo-200 flex items-center space-x-1">
+                      <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 mr-1" />
+                      <span>Batch Entries Detected ({drafts.length} entries)</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-300">
+                      Entry {activeDraftIndex + 1} of {drafts.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
+                    {drafts.map((d, idx) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => setActiveDraftIndex(idx)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black shrink-0 transition-all flex items-center space-x-1 border ${
+                          idx === activeDraftIndex
+                            ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
+                            : d.confirmed
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        {d.confirmed && <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                        <span>#{idx + 1} {d.customerName || 'Entry'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Field Verification Notice */}
+              <div className="bg-blue-50/80 dark:bg-slate-800/60 p-2.5 rounded-xl border border-blue-200 dark:border-slate-700 flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center space-x-1">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>AI Detection is Draft Only — Merchant Confirmation Required</span>
+                </span>
+              </div>
+
+              {/* Review Card */}
               <div className="bg-slate-900 text-white p-4.5 rounded-3xl space-y-4 shadow-xl border border-slate-800">
-                {/* Detected Customer Name */}
+                {/* Customer Name + Detection Badge */}
                 <div>
-                  <label className="block text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-1">
-                    {t.name_detected}
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">
+                      Customer Name <span className="text-red-400">*</span>
+                    </label>
+                    {renderBadge(activeDraft.nameBadge)}
+                  </div>
                   <input
                     type="text"
-                    value={editedName}
-                    onChange={(e) => handleNameInputChange(e.target.value)}
-                    placeholder="Customer Name"
-                    className="w-full px-4 py-3 bg-slate-800 text-white rounded-xl border border-slate-700 font-black text-xl outline-none focus:border-blue-500"
+                    value={activeDraft.customerName}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                    placeholder="Enter Customer Name"
+                    className="w-full px-4 py-3 bg-slate-800 text-white rounded-xl border border-slate-700 font-black text-lg outline-none focus:border-blue-500"
                   />
+                </div>
+
+                {/* Mobile Number (Mandatory) + Detection Badge */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center">
+                      <Phone className="w-3 h-3 mr-1 text-slate-400" />
+                      Mobile Number <span className="text-red-400">*</span>
+                    </label>
+                    {renderBadge(activeDraft.phoneBadge, '! Phone required')}
+                  </div>
+                  <input
+                    type="tel"
+                    value={activeDraft.phone}
+                    onChange={(e) => handlePhoneChange(e.target.value)}
+                    placeholder="Enter 10-digit mobile number"
+                    className="w-full px-4 py-3 bg-slate-800 text-white rounded-xl border border-slate-700 font-bold text-base outline-none focus:border-blue-500"
+                  />
+                  {!hasValidPhone && (
+                    <span className="text-[10px] text-amber-400 font-semibold mt-1 block">
+                      ⚠️ Valid mobile number is required to save and send WhatsApp receipt
+                    </span>
+                  )}
                 </div>
 
                 {/* Detected Amount in LARGE Font with Indic digit support */}
                 <div>
-                  <label className="block text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-1">
-                    {t.amount_detected}
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">
+                      {t.amount_detected} <span className="text-red-400">*</span>
+                    </label>
+                    {renderBadge(activeDraft.amountBadge)}
+                  </div>
                   <div className="relative">
                     <span className="absolute left-4 top-3 text-2xl font-black text-slate-400">
                       {curr}
@@ -448,8 +742,8 @@ export const ScanLedgerModal: React.FC<Props> = ({
                     <input
                       type="text"
                       inputMode="decimal"
-                      value={editedAmount}
-                      onChange={(e) => setEditedAmount(e.target.value)}
+                      value={activeDraft.amount}
+                      onChange={(e) => handleAmountChange(e.target.value)}
                       placeholder="0"
                       className="w-full pl-10 pr-4 py-3 bg-slate-800 text-white rounded-xl border border-slate-700 font-black text-3xl tracking-tight outline-none focus:border-blue-500"
                     />
@@ -460,9 +754,9 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 <div className="grid grid-cols-2 gap-2.5 pt-1">
                   <button
                     type="button"
-                    onClick={() => setEditedType('credit_given')}
+                    onClick={() => handleTypeChange('credit_given')}
                     className={`py-3 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center space-x-1.5 transition-all border-2 ${
-                      editedType === 'credit_given'
+                      activeDraft.type === 'credit_given'
                         ? 'bg-red-600 border-red-500 text-white shadow-md'
                         : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
                     }`}
@@ -473,9 +767,9 @@ export const ScanLedgerModal: React.FC<Props> = ({
 
                   <button
                     type="button"
-                    onClick={() => setEditedType('payment_received')}
+                    onClick={() => handleTypeChange('payment_received')}
                     className={`py-3 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center space-x-1.5 transition-all border-2 ${
-                      editedType === 'payment_received'
+                      activeDraft.type === 'payment_received'
                         ? 'bg-green-600 border-green-500 text-white shadow-md'
                         : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
                     }`}
@@ -486,78 +780,87 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* Customer Auto-Matching Card */}
+              {/* Customer Auto-Matching & Ambiguity Guard */}
               <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
-                {matchedCustomer ? (
+                {activeDraft.matchedCustomer ? (
                   <div className="flex items-center justify-between bg-green-50 dark:bg-green-950/60 border border-green-200 dark:border-green-800 p-3 rounded-xl gap-2 min-w-0">
                     <div className="flex items-center space-x-2 min-w-0 flex-1 pr-1">
                       <UserCheck className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
                       <div className="min-w-0 flex-1">
                         <span className="font-extrabold text-slate-900 dark:text-white text-sm block truncate">
-                          {matchedCustomer.display_label || matchedCustomer.name}
+                          {activeDraft.matchedCustomer.display_label || activeDraft.matchedCustomer.name}
                         </span>
                         <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block truncate">
-                          {matchedCustomer.phone_number || 'No phone recorded'}
+                          {activeDraft.matchedCustomer.phone_number || activeDraft.phone || 'No phone recorded'}
                         </span>
                       </div>
                     </div>
-                    <span className="bg-green-600 text-white font-black text-[10px] uppercase px-2 py-0.5 rounded-md shrink-0">
-                      Matched
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCustomer(null)}
+                      className="bg-green-600 hover:bg-green-700 text-white font-black text-[10px] uppercase px-2 py-1 rounded-md shrink-0 transition-colors"
+                    >
+                      Matched (Change)
+                    </button>
+                  </div>
+                ) : activeDraft.ambiguousCandidates.length > 0 ? (
+                  <div className="space-y-2 bg-amber-50 dark:bg-amber-950/40 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
+                    <div className="flex items-center space-x-1.5 text-amber-800 dark:text-amber-200 font-black text-xs">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Multiple Customers Match "{activeDraft.customerName}"</span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                      Select the exact customer below to prevent balance mixing:
+                    </p>
+                    <div className="space-y-1 pt-1">
+                      {activeDraft.ambiguousCandidates.map((cand) => (
+                        <button
+                          key={cand.id}
+                          type="button"
+                          onClick={() => handleSelectCustomer(cand)}
+                          className="w-full text-left p-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 flex items-center justify-between"
+                        >
+                          <span className="font-bold text-slate-900 dark:text-white">
+                            {cand.display_label || cand.name}
+                          </span>
+                          <span className="text-[10px] text-slate-500">{cand.phone_number || 'No phone'}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-slate-700 dark:text-slate-300 font-bold">
                       <span>{t.select_customer}:</span>
-                      <button
-                        type="button"
-                        onClick={() => setIsCreatingNewCust(!isCreatingNewCust)}
-                        className="text-blue-600 dark:text-blue-400 hover:underline font-extrabold"
-                      >
-                        + {t.add_customer}
-                      </button>
+                      <span className="text-blue-600 dark:text-blue-400 font-extrabold">
+                        + New Customer
+                      </span>
                     </div>
 
                     <select
-                      value={(matchedCustomer as Customer | null)?.id || ''}
+                      value=""
                       onChange={(e) => {
                         const found = customers.find((c) => c.id === e.target.value);
-                        setMatchedCustomer(found || null);
+                        handleSelectCustomer(found || null);
                       }}
                       className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-xs outline-none"
                     >
-                      <option value="">-- {t.select_customer} --</option>
+                      <option value="">-- Save as New Customer: "{activeDraft.customerName || 'New'}" --</option>
                       {customers.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.display_label || c.name} {c.phone_number ? `(${c.phone_number})` : ''}
                         </option>
                       ))}
                     </select>
-
-                    {isCreatingNewCust && (
-                      <div className="pt-2 space-y-2 border-t border-slate-200 dark:border-slate-700">
-                        <span className="font-extrabold text-blue-700 dark:text-blue-400 block">
-                          Creating New Customer for "{editedName}"
-                        </span>
-                        <input
-                          type="tel"
-                          value={newCustPhone}
-                          onChange={(e) => setNewCustPhone(e.target.value)}
-                          placeholder="Enter Mobile Number (Optional)"
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold outline-none"
-                        />
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
 
-              {/* Step 6: Real-Time Balance Preview */}
+              {/* Real-Time Balance Preview */}
               {(() => {
-                const parsed = parseIndicAmount(editedAmount);
-                const numericAmount = parsed.isValid ? parsed.amount : 0;
-                const currentBal = matchedCustomer ? (matchedCustomer.balance || 0) : 0;
-                const isCredit = editedType === 'credit_given';
+                const numericAmount = activeAmountParsed.amount;
+                const currentBal = activeDraft.matchedCustomer ? activeDraft.matchedCustomer.balance || 0 : 0;
+                const isCredit = activeDraft.type === 'credit_given';
                 const projectedBal = isCredit ? currentBal + numericAmount : currentBal - numericAmount;
 
                 return (
@@ -575,7 +878,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
                     <div className="flex items-center justify-between text-xs pt-1">
                       <div>
                         <span className="text-slate-500 dark:text-slate-400 font-semibold block text-[11px]">
-                          {matchedCustomer ? 'Current Due' : 'Starting Due'}
+                          {activeDraft.matchedCustomer ? 'Current Due' : 'Starting Due'}
                         </span>
                         <span className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">
                           {formatShopCurrency(currentBal, shop?.country, shop?.currency_code)}
@@ -588,8 +891,13 @@ export const ScanLedgerModal: React.FC<Props> = ({
                         <span className="text-slate-500 dark:text-slate-400 font-semibold block text-[11px]">
                           Tx Amount
                         </span>
-                        <span className={`font-black text-sm ${isCredit ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                          {isCredit ? '+' : '-'}{formatShopCurrency(numericAmount, shop?.country, shop?.currency_code)}
+                        <span
+                          className={`font-black text-sm ${
+                            isCredit ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                          }`}
+                        >
+                          {isCredit ? '+' : '-'}
+                          {formatShopCurrency(numericAmount, shop?.country, shop?.currency_code)}
                         </span>
                       </div>
 
@@ -601,7 +909,9 @@ export const ScanLedgerModal: React.FC<Props> = ({
                         </span>
                         <span
                           className={`font-black text-base ${
-                            projectedBal > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                            projectedBal > 0
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-green-600 dark:text-green-400'
                           }`}
                         >
                           {formatShopCurrency(Math.abs(projectedBal), shop?.country, shop?.currency_code)}
@@ -612,21 +922,69 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 );
               })()}
 
-              {/* Note Optional */}
-              <input
-                type="text"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder={t.note_optional}
-                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:bg-white focus:border-blue-600 outline-none"
-              />
+              {/* Collapsible Optional Details Drawer (Items & Notes) */}
+              <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden bg-slate-50 dark:bg-slate-800/50">
+                <button
+                  type="button"
+                  onClick={() => setShowOptionalDetails(!showOptionalDetails)}
+                  className="w-full p-3 flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <span className="flex items-center space-x-1.5">
+                    <span>Optional Details (Items & Note)</span>
+                    {activeDraft.optionalItems.length > 0 && (
+                      <span className="bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 px-1.5 py-0.5 rounded-md text-[10px]">
+                        {activeDraft.optionalItems.length} items
+                      </span>
+                    )}
+                  </span>
+                  {showOptionalDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
 
-              {/* Step 7: Explicit Confirm & Save Action Button */}
+                {showOptionalDetails && (
+                  <div className="p-3 pt-0 space-y-2.5 border-t border-slate-200 dark:border-slate-700 animate-in fade-in">
+                    {/* Itemized Items */}
+                    {activeDraft.optionalItems.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                          Detected Items
+                        </span>
+                        <div className="space-y-1">
+                          {activeDraft.optionalItems.map((it, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between bg-white dark:bg-slate-800 p-2 rounded-lg text-xs font-semibold"
+                            >
+                              <span>{it.name} {it.quantity > 1 ? `x${it.quantity}` : ''}</span>
+                              <span className="font-bold">{curr} {it.total || it.unit_price}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Note Input */}
+                    <div>
+                      <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">
+                        {t.note_optional}
+                      </label>
+                      <input
+                        type="text"
+                        value={activeDraft.optionalNote}
+                        onChange={(e) => updateActiveDraft({ optionalNote: e.target.value })}
+                        placeholder={t.note_optional}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:border-blue-600 outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Explicit Confirm & Save Action Button */}
               <button
                 type="button"
-                disabled={!editedAmount || !parseIndicAmount(editedAmount).isValid || parseIndicAmount(editedAmount).amount <= 0 || !editedName.trim() || uploading}
-                onClick={handleConfirmSave}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-base rounded-2xl shadow-xl shadow-blue-600/30 flex items-center justify-center space-x-2 transition-all active:scale-[0.98] disabled:opacity-50"
+                disabled={!isDraftSavable}
+                onClick={handleConfirmActiveDraft}
+                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-base rounded-2xl shadow-xl shadow-blue-600/30 flex items-center justify-center space-x-2 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {uploading ? (
                   <>
@@ -636,10 +994,29 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 ) : (
                   <>
                     <CheckCircle2 className="w-5 h-5" />
-                    <span>{t.confirm_and_save}</span>
+                    <span>
+                      {drafts.length > 1
+                        ? `Confirm & Save Entry #${activeDraftIndex + 1}`
+                        : t.confirm_and_save}
+                    </span>
                   </>
                 )}
               </button>
+
+              {/* Helpful Validation Hint if Disabled */}
+              {!isDraftSavable && !uploading && (
+                <div className="text-center text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  {!hasValidName
+                    ? '⚠️ Customer name is required'
+                    : !hasValidPhone
+                    ? '⚠️ Valid 10-digit mobile number is required'
+                    : !hasValidAmount
+                    ? '⚠️ Amount must be greater than 0'
+                    : activeDraft.confirmed
+                    ? '✅ This entry is already saved!'
+                    : ''}
+                </div>
+              )}
             </div>
           )}
         </div>
