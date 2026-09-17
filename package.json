@@ -12,7 +12,9 @@
     "mobile:sync": "npx cap sync android",
     "mobile:open": "npx cap open android",
     "mobile:apk": "npm run mobile:build && node scripts/build-apk.js",
-    "mobile:aab": "npm run mobile:build && node scripts/build-aab.js"
+    "mobile:aab": "npm run mobile:build && node scripts/build-aab.js",
+    "mobile:release": "node scripts/release-pipeline.js",
+    "mobile:version": "node scripts/bump-version.js"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

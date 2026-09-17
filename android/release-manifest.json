@@ -1,0 +1,14 @@
+{
+  "applicationId": "com.smartkhata.app",
+  "currentVersionName": "1.0.0",
+  "currentVersionCode": 1,
+  "history": [
+    {
+      "versionName": "1.0.0",
+      "versionCode": 1,
+      "date": "2026-09-17T08:48:00Z",
+      "gitCommit": "e749946",
+      "notes": "Initial Capacitor Android conversion (Target API 36)"
+    }
+  ]
+}

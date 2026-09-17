@@ -26,3 +26,4 @@ local.properties
 .gradle/
 *.apk
 *.aab
+release-builds/
