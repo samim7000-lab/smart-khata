@@ -6,6 +6,10 @@ import { resolveCurrencySymbol, formatShopCurrency } from '../lib/countryPricing
 import { validateImageFile, compressImage, uploadLedgerPhotoProof } from '../lib/imageUtils';
 import { parseIndicAmount } from '../lib/indicNumerals';
 import {
+  resolveCustomerIdentity,
+  IdentityStatus,
+} from '../lib/customerIdentityResolver';
+import {
   Camera,
   X,
   Sparkles,
@@ -55,7 +59,9 @@ export interface ScanDraft {
   confidence: number;
   matchedCustomer: Customer | null;
   isCreatingNewCust: boolean;
-  ambiguousCandidates: Customer[];
+  identityStatus: IdentityStatus;
+  resolutionReasons: string[];
+  candidates: Customer[];
   nameBadge: BadgeState;
   phoneBadge: BadgeState;
   amountBadge: BadgeState;
@@ -86,59 +92,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper: Normalize phone to match last 10 digits
-  const normalizePhone = (p: string): string => {
-    if (!p) return '';
-    return p.replace(/\D/g, '').slice(-10);
-  };
-
-  // 1. Customer Matching Engine with Phone First & Ambiguity Guard
-  const findCustomerMatch = (
-    name: string,
-    phone: string,
-    custList: Customer[]
-  ): { match: Customer | null; candidates: Customer[]; isAmbiguous: boolean } => {
-    const normPhone = normalizePhone(phone);
-    if (normPhone.length >= 10) {
-      const phoneMatch = custList.find((c) => normalizePhone(c.phone_number) === normPhone);
-      if (phoneMatch) {
-        return { match: phoneMatch, candidates: [], isAmbiguous: false };
-      }
-    }
-
-    const trimmed = name.trim().toLowerCase();
-    if (!trimmed) {
-      return { match: null, candidates: [], isAmbiguous: false };
-    }
-
-    // Exact Match by name or display_label
-    const exact = custList.find(
-      (c) =>
-        c.name.toLowerCase() === trimmed ||
-        (c.display_label && c.display_label.toLowerCase() === trimmed)
-    );
-    if (exact) {
-      return { match: exact, candidates: [], isAmbiguous: false };
-    }
-
-    // Partial / Fuzzy Match
-    const fuzzy = custList.filter(
-      (c) =>
-        c.name.toLowerCase().includes(trimmed) ||
-        trimmed.includes(c.name.toLowerCase()) ||
-        (c.display_label && c.display_label.toLowerCase().includes(trimmed))
-    );
-
-    if (fuzzy.length === 1) {
-      return { match: fuzzy[0], candidates: [], isAmbiguous: false };
-    } else if (fuzzy.length > 1) {
-      return { match: null, candidates: fuzzy, isAmbiguous: true };
-    }
-
-    return { match: null, candidates: [], isAmbiguous: false };
-  };
-
-  // Helper: Initialize a draft card from OCR data
+  // Helper: Initialize a draft card from OCR data using Canonical Identity Resolver
   const createDraftFromData = (
     id: string,
     name: string,
@@ -151,7 +105,14 @@ export const ScanLedgerModal: React.FC<Props> = ({
   ): ScanDraft => {
     const cleanName = name.trim();
     const cleanPhone = phone.trim();
-    const matchResult = findCustomerMatch(cleanName, cleanPhone, customers);
+
+    // Canonical Identity Resolution
+    const resolution = resolveCustomerIdentity({
+      extractedName: cleanName,
+      extractedPhone: cleanPhone,
+      shopId: shop.id,
+      customers,
+    });
 
     const nameBadge: BadgeState = cleanName
       ? confidence >= 0.8 ? 'detected' : 'check'
@@ -159,26 +120,28 @@ export const ScanLedgerModal: React.FC<Props> = ({
 
     const phoneBadge: BadgeState = cleanPhone
       ? confidence >= 0.8 ? 'detected' : 'check'
-      : matchResult.match?.phone_number ? 'detected' : 'manual';
+      : resolution.matchedCustomer?.phone_number ? 'detected' : 'manual';
 
     const amountBadge: BadgeState = amountNum > 0
       ? confidence >= 0.8 ? 'detected' : 'check'
       : 'manual';
 
-    const resolvedPhone = cleanPhone || (matchResult.match?.phone_number || '');
+    const resolvedPhone = cleanPhone || (resolution.matchedCustomer?.phone_number || '');
 
     return {
       id,
-      customerName: cleanName || (matchResult.match?.name || ''),
+      customerName: cleanName || (resolution.matchedCustomer?.name || ''),
       phone: resolvedPhone,
       amount: amountNum > 0 ? String(amountNum) : '',
       type: txType === 'payment_received' ? 'payment_received' : 'credit_given',
       optionalItems: items,
       optionalNote: memo,
       confidence,
-      matchedCustomer: matchResult.match,
-      isCreatingNewCust: !matchResult.match && Boolean(cleanName),
-      ambiguousCandidates: matchResult.candidates,
+      matchedCustomer: resolution.matchedCustomer,
+      isCreatingNewCust: resolution.status === 'NO_MATCH',
+      identityStatus: resolution.status,
+      resolutionReasons: resolution.reasons,
+      candidates: resolution.candidates,
       nameBadge,
       phoneBadge,
       amountBadge,
@@ -186,7 +149,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
     };
   };
 
-  // 2. Handle File Selection (Dual Camera & Gallery)
+  // 1. Handle File Selection (Dual Camera & Gallery)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -216,7 +179,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
     }
   };
 
-  // 3. Run Gemini AI OCR via Real Edge Function Only
+  // 2. Run Gemini AI OCR via Real Edge Function Only
   const runOcr = async (base64Img: string) => {
     setAnalyzing(true);
     setOcrResult(null);
@@ -228,7 +191,6 @@ export const ScanLedgerModal: React.FC<Props> = ({
       setOcrResult(res);
 
       if (res.isValidLedger && !res.error) {
-        // Multi-entry vs single entry detection
         if (res.drafts && res.drafts.length > 1) {
           const generatedDrafts: ScanDraft[] = res.drafts.map((d: GeminiOcrDraft, idx: number) =>
             createDraftFromData(
@@ -244,7 +206,6 @@ export const ScanLedgerModal: React.FC<Props> = ({
           );
           setDrafts(generatedDrafts);
         } else {
-          // Single draft
           const singleDraft = createDraftFromData(
             'draft-1',
             res.customerName,
@@ -287,23 +248,38 @@ export const ScanLedgerModal: React.FC<Props> = ({
   // Handlers for Active Draft Field Changes
   const handleNameChange = (val: string) => {
     if (!activeDraft) return;
-    const matchResult = findCustomerMatch(val, activeDraft.phone, customers);
+    const res = resolveCustomerIdentity({
+      extractedName: val,
+      extractedPhone: activeDraft.phone,
+      shopId: shop.id,
+      customers,
+    });
     updateActiveDraft({
       customerName: val,
-      matchedCustomer: matchResult.match,
-      ambiguousCandidates: matchResult.candidates,
-      isCreatingNewCust: !matchResult.match && Boolean(val.trim()),
+      matchedCustomer: res.matchedCustomer,
+      identityStatus: res.status,
+      resolutionReasons: res.reasons,
+      candidates: res.candidates,
+      isCreatingNewCust: res.status === 'NO_MATCH',
       nameBadge: 'manual',
     });
   };
 
   const handlePhoneChange = (val: string) => {
     if (!activeDraft) return;
-    const matchResult = findCustomerMatch(activeDraft.customerName, val, customers);
+    const res = resolveCustomerIdentity({
+      extractedName: activeDraft.customerName,
+      extractedPhone: val,
+      shopId: shop.id,
+      customers,
+    });
     updateActiveDraft({
       phone: val,
-      matchedCustomer: matchResult.match || activeDraft.matchedCustomer,
-      ambiguousCandidates: matchResult.candidates,
+      matchedCustomer: res.matchedCustomer,
+      identityStatus: res.status,
+      resolutionReasons: res.reasons,
+      candidates: res.candidates,
+      isCreatingNewCust: res.status === 'NO_MATCH',
       phoneBadge: 'manual',
     });
   };
@@ -326,12 +302,16 @@ export const ScanLedgerModal: React.FC<Props> = ({
         matchedCustomer: customer,
         customerName: customer.display_label || customer.name,
         phone: customer.phone_number || activeDraft.phone,
-        ambiguousCandidates: [],
+        identityStatus: 'EXACT_PHONE_AND_NAME',
+        resolutionReasons: ['Merchant explicitly confirmed this customer'],
+        candidates: [],
         isCreatingNewCust: false,
       });
     } else {
       updateActiveDraft({
         matchedCustomer: null,
+        identityStatus: 'NO_MATCH',
+        candidates: [],
         isCreatingNewCust: true,
       });
     }
@@ -352,16 +332,25 @@ export const ScanLedgerModal: React.FC<Props> = ({
   // 2. Phone digits length >= 10
   // 3. Amount > 0
   // 4. Direction is selected
+  // 5. Must NOT be an unresolved PHONE_CONFLICT or AMBIGUOUS state
   const activeAmountParsed = activeDraft ? parseIndicAmount(activeDraft.amount) : { amount: 0, isValid: false };
   const hasValidName = Boolean(activeDraft && activeDraft.customerName.trim().length > 0);
   const activePhoneDigits = activeDraft ? activeDraft.phone.replace(/\D/g, '') : '';
   const hasValidPhone = activePhoneDigits.length >= 10;
   const hasValidAmount = Boolean(activeAmountParsed.isValid && activeAmountParsed.amount > 0);
+  const isUnresolvedConflictOrAmbiguity = Boolean(
+    activeDraft &&
+    (activeDraft.identityStatus === 'PHONE_CONFLICT' || activeDraft.identityStatus === 'AMBIGUOUS') &&
+    !activeDraft.matchedCustomer &&
+    !activeDraft.isCreatingNewCust
+  );
+
   const isDraftSavable = Boolean(
     activeDraft &&
     hasValidName &&
     hasValidPhone &&
     hasValidAmount &&
+    !isUnresolvedConflictOrAmbiguity &&
     !activeDraft.confirmed &&
     !uploading
   );
@@ -409,7 +398,6 @@ export const ScanLedgerModal: React.FC<Props> = ({
       } else {
         const anyUnconfirmed = drafts.find((d) => !d.confirmed);
         if (!anyUnconfirmed) {
-          // All drafts confirmed!
           onClose();
         }
       }
@@ -780,83 +768,174 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* Customer Auto-Matching & Ambiguity Guard */}
-              <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
-                {activeDraft.matchedCustomer ? (
-                  <div className="flex items-center justify-between bg-green-50 dark:bg-green-950/60 border border-green-200 dark:border-green-800 p-3 rounded-xl gap-2 min-w-0">
-                    <div className="flex items-center space-x-2 min-w-0 flex-1 pr-1">
-                      <UserCheck className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <span className="font-extrabold text-slate-900 dark:text-white text-sm block truncate">
-                          {activeDraft.matchedCustomer.display_label || activeDraft.matchedCustomer.name}
-                        </span>
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block truncate">
-                          {activeDraft.matchedCustomer.phone_number || activeDraft.phone || 'No phone recorded'}
-                        </span>
+              {/* ----------------------------------------------------------------- */}
+              {/* CANONICAL CUSTOMER IDENTITY RESOLUTION CARD                       */}
+              {/* ----------------------------------------------------------------- */}
+              <div className="space-y-3">
+                {/* 1. PHONE CONFLICT STATE */}
+                {activeDraft.identityStatus === 'PHONE_CONFLICT' && (
+                  <div className="bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-300 dark:border-rose-800 p-4 rounded-2xl space-y-3 shadow-sm">
+                    <div className="flex items-center space-x-2 text-rose-700 dark:text-rose-300 font-black text-xs sm:text-sm">
+                      <AlertTriangle className="w-5 h-5 shrink-0 text-rose-600" />
+                      <span>⚠ নাম মিলে গেছে, কিন্তু Mobile Number আলাদা</span>
+                    </div>
+                    <p className="text-xs text-rose-900 dark:text-rose-200 font-medium leading-relaxed">
+                      {activeDraft.resolutionReasons[0] ||
+                        'Customer name matches an existing record, but the mobile number is different. Please select the correct action to prevent account mix-ups.'}
+                    </p>
+
+                    <div className="bg-white/80 dark:bg-slate-800/80 p-3 rounded-xl border border-rose-200 dark:border-rose-900 text-xs space-y-1">
+                      <div className="text-slate-600 dark:text-slate-400">
+                        Scanned Entry: <strong className="text-slate-900 dark:text-white">{activeDraft.customerName}</strong> ({activeDraft.phone})
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectCustomer(null)}
-                      className="bg-green-600 hover:bg-green-700 text-white font-black text-[10px] uppercase px-2 py-1 rounded-md shrink-0 transition-colors"
-                    >
-                      Matched (Change)
-                    </button>
-                  </div>
-                ) : activeDraft.ambiguousCandidates.length > 0 ? (
-                  <div className="space-y-2 bg-amber-50 dark:bg-amber-950/40 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
-                    <div className="flex items-center space-x-1.5 text-amber-800 dark:text-amber-200 font-black text-xs">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>Multiple Customers Match "{activeDraft.customerName}"</span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                      Select the exact customer below to prevent balance mixing:
-                    </p>
-                    <div className="space-y-1 pt-1">
-                      {activeDraft.ambiguousCandidates.map((cand) => (
+
+                    <div className="space-y-2 pt-1">
+                      {activeDraft.candidates.map((cand) => (
                         <button
                           key={cand.id}
                           type="button"
                           onClick={() => handleSelectCustomer(cand)}
-                          className="w-full text-left p-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 flex items-center justify-between"
+                          className="w-full text-left p-3 rounded-xl bg-white dark:bg-slate-800 hover:bg-rose-100/50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 flex items-center justify-between transition-colors"
                         >
-                          <span className="font-bold text-slate-900 dark:text-white">
-                            {cand.display_label || cand.name}
+                          <div>
+                            <span className="font-extrabold text-xs text-slate-900 dark:text-white block">
+                              {cand.display_label || cand.name}
+                            </span>
+                            <span className="text-[10px] text-slate-500 block">
+                              Recorded Phone: {cand.phone_number} • Current Due: ₹{cand.balance || 0}
+                            </span>
+                          </div>
+                          <span className="text-rose-700 dark:text-rose-400 font-black text-xs">
+                            ✓ Use This Customer
                           </span>
-                          <span className="text-[10px] text-slate-500">{cand.phone_number || 'No phone'}</span>
                         </button>
                       ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-slate-700 dark:text-slate-300 font-bold">
-                      <span>{t.select_customer}:</span>
-                      <span className="text-blue-600 dark:text-blue-400 font-extrabold">
-                        + New Customer
-                      </span>
-                    </div>
 
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        const found = customers.find((c) => c.id === e.target.value);
-                        handleSelectCustomer(found || null);
-                      }}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-xs outline-none"
-                    >
-                      <option value="">-- Save as New Customer: "{activeDraft.customerName || 'New'}" --</option>
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.display_label || c.name} {c.phone_number ? `(${c.phone_number})` : ''}
-                        </option>
-                      ))}
-                    </select>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCustomer(null)}
+                        className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all active:scale-[0.98]"
+                      >
+                        <span>+ Save as Separate New Customer</span>
+                      </button>
+                    </div>
                   </div>
                 )}
+
+                {/* 2. AMBIGUOUS CANDIDATES STATE */}
+                {activeDraft.identityStatus === 'AMBIGUOUS' && (
+                  <div className="bg-amber-50 dark:bg-amber-950/60 border-2 border-amber-300 dark:border-amber-800 p-4 rounded-2xl space-y-3 shadow-sm">
+                    <div className="flex items-center space-x-2 text-amber-800 dark:text-amber-200 font-black text-xs sm:text-sm">
+                      <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
+                      <span>⚠ একই রকম একাধিক Customer পাওয়া গেছে</span>
+                    </div>
+                    <p className="text-xs text-amber-900 dark:text-amber-200 font-medium">
+                      Select which customer account this transaction belongs to:
+                    </p>
+                    <div className="space-y-1.5 pt-1">
+                      {activeDraft.candidates.map((cand) => (
+                        <button
+                          key={cand.id}
+                          type="button"
+                          onClick={() => handleSelectCustomer(cand)}
+                          className="w-full text-left p-3 rounded-xl bg-white dark:bg-slate-800 hover:bg-amber-100/50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 flex items-center justify-between transition-colors"
+                        >
+                          <div>
+                            <span className="font-extrabold text-xs text-slate-900 dark:text-white block">
+                              {cand.display_label || cand.name}
+                            </span>
+                            <span className="text-[10px] text-slate-500 block">
+                              Phone: {cand.phone_number || 'No phone'} • Due: ₹{cand.balance || 0}
+                            </span>
+                          </div>
+                          <span className="text-amber-700 dark:text-amber-400 font-black text-xs">
+                            Select
+                          </span>
+                        </button>
+                      ))}
+
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCustomer(null)}
+                        className="w-full py-2.5 px-3 bg-white dark:bg-slate-800 hover:bg-slate-100 border border-slate-300 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl text-center"
+                      >
+                        + None of these (Save as New Customer)
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. CONFIRMED / EXACT / STRONG MATCH STATE */}
+                {activeDraft.matchedCustomer && (
+                  <div className="bg-green-50 dark:bg-green-950/60 border border-green-200 dark:border-green-800 p-3.5 rounded-2xl gap-2 min-w-0 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2.5 min-w-0 flex-1 pr-2">
+                        <div className="p-2 bg-green-100 dark:bg-green-900 rounded-xl shrink-0">
+                          <UserCheck className="w-5 h-5 text-green-700 dark:text-green-300" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center space-x-1.5 flex-wrap">
+                            <span className="font-extrabold text-slate-900 dark:text-white text-sm truncate">
+                              {activeDraft.matchedCustomer.display_label || activeDraft.matchedCustomer.name}
+                            </span>
+                            <span className="bg-green-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                              ✓ আগের Customer-এর সাথে মিলেছে
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block truncate mt-0.5">
+                            Phone: {activeDraft.matchedCustomer.phone_number || activeDraft.phone || 'No phone recorded'} • Current Due: ₹{activeDraft.matchedCustomer.balance || 0}
+                          </span>
+                          {activeDraft.resolutionReasons.length > 0 && (
+                            <span className="text-[10px] text-green-700 dark:text-green-300 font-semibold block mt-0.5">
+                              {activeDraft.resolutionReasons.join(' • ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCustomer(null)}
+                        className="bg-green-600 hover:bg-green-700 text-white font-black text-[10px] uppercase px-2.5 py-1.5 rounded-xl shrink-0 transition-colors shadow-sm"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. NEW CUSTOMER SELECTION / NO MATCH STATE */}
+                {!activeDraft.matchedCustomer &&
+                  activeDraft.identityStatus !== 'PHONE_CONFLICT' &&
+                  activeDraft.identityStatus !== 'AMBIGUOUS' && (
+                    <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+                      <div className="flex items-center justify-between text-slate-700 dark:text-slate-300 font-bold">
+                        <span>{t.select_customer}:</span>
+                        <span className="text-blue-600 dark:text-blue-400 font-extrabold">
+                          + নতুন Customer যোগ করুন
+                        </span>
+                      </div>
+
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const found = customers.find((c) => c.id === e.target.value);
+                          handleSelectCustomer(found || null);
+                        }}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-xs outline-none"
+                      >
+                        <option value="">-- Save as New Customer: "{activeDraft.customerName || 'New'}" --</option>
+                        {customers.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.display_label || c.name} {c.phone_number ? `(${c.phone_number})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
               </div>
 
-              {/* Real-Time Balance Preview */}
+              {/* Real-Time Balance Preview (Cross-Account Mislink Detection) */}
               {(() => {
                 const numericAmount = activeAmountParsed.amount;
                 const currentBal = activeDraft.matchedCustomer ? activeDraft.matchedCustomer.balance || 0 : 0;
@@ -1012,6 +1091,8 @@ export const ScanLedgerModal: React.FC<Props> = ({
                     ? '⚠️ Valid 10-digit mobile number is required'
                     : !hasValidAmount
                     ? '⚠️ Amount must be greater than 0'
+                    : isUnresolvedConflictOrAmbiguity
+                    ? '⚠️ Please resolve customer selection above before saving'
                     : activeDraft.confirmed
                     ? '✅ This entry is already saved!'
                     : ''}
