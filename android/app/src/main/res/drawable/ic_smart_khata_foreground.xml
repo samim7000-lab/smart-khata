@@ -1,0 +1,49 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="18"
+        android:translateY="18"
+        android:scaleX="0.72"
+        android:scaleY="0.72">
+        <!-- Book Spine Base -->
+        <path
+            android:fillColor="#2563EB"
+            android:pathData="M28,15 h44 c5.5,0 10,4.5 10,10 v50 c0,5.5 -4.5,10 -10,10 h-44 c-5.5,0 -10,-4.5 -10,-10 v-50 c0,-5.5 4.5,-10 10,-10 z" />
+        <!-- Inner Pages -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M32,21 h38 c3.3,0 6,2.7 6,6 v46 c0,3.3 -2.7,6 -6,6 h-38 c-3.3,0 -6,-2.7 -6,-6 v-46 c0,-3.3 2.7,-6 6,-6 z" />
+        <!-- Lines -->
+        <path
+            android:strokeColor="#CBD5E1"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:pathData="M32,32 L68,32" />
+        <path
+            android:strokeColor="#CBD5E1"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:pathData="M32,44 L58,44" />
+        <!-- Credit Check / Arrow -->
+        <path
+            android:strokeColor="#F59E0B"
+            android:strokeWidth="7"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M32,60 L44,70 L68,46" />
+        <!-- Ribbon Bookmark -->
+        <path
+            android:fillColor="#EF4444"
+            android:pathData="M64,15 v17 l7,-5 l7,5 v-17 Z" />
+        <!-- Nodes -->
+        <path
+            android:fillColor="#60A5FA"
+            android:pathData="M24,69 a5,5 0 1,0 0.001,0 Z" />
+        <path
+            android:fillColor="#34D399"
+            android:pathData="M76,20 a4,4 0 1,0 0.001,0 Z" />
+    </group>
+</vector>

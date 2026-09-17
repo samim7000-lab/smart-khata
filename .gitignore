@@ -18,3 +18,11 @@ Thumbs.db
 !.vscode/settings.json
 
 supabase/.temp/
+
+# Android Signing Keys & Gradle Locals
+*.jks
+*.keystore
+local.properties
+.gradle/
+*.apk
+*.aab

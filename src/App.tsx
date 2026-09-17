@@ -42,6 +42,10 @@ import {
 } from './lib/supabase';
 
 import { Loader2 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { Browser } from '@capacitor/browser';
 
 // Helper to validate canonical PostgreSQL UUID string format
 const isValidUuid = (val?: string | null): boolean => {
@@ -115,8 +119,16 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
+      if (Capacitor.isNativePlatform()) {
+        StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: '#0f172a' }).catch(() => {});
+      }
     } else {
       document.documentElement.classList.remove('dark');
+      if (Capacitor.isNativePlatform()) {
+        StatusBar.setStyle({ style: Style.Light }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: '#f8fafc' }).catch(() => {});
+      }
     }
     localStorage.setItem('smart_khata_theme', theme);
   }, [theme]);
@@ -369,6 +381,137 @@ export const App: React.FC = () => {
     };
 
     initAuth();
+  }, []);
+
+  // Native Android Back Button Handler (Proper UX Navigation Hierarchy)
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const backListener = CapApp.addListener('backButton', () => {
+      // 1. Close Modals in reverse order of priority
+      if (receiptModalData) {
+        setReceiptModalData(null);
+        return;
+      }
+      if (isAddTxOpen) {
+        setIsAddTxOpen(false);
+        return;
+      }
+      if (isScanLedgerOpen) {
+        setIsScanLedgerOpen(false);
+        return;
+      }
+      if (isSubscriptionOpen) {
+        setIsSubscriptionOpen(false);
+        return;
+      }
+      if (isShopsOpen) {
+        setIsShopsOpen(false);
+        return;
+      }
+      if (isStaffOpen) {
+        setIsStaffOpen(false);
+        return;
+      }
+      if (lockedFeatureName) {
+        setLockedFeatureName(null);
+        return;
+      }
+
+      // 2. Customer Detail back to main
+      if (screen === 'customer_detail' || selectedCustomer) {
+        setSelectedCustomer(null);
+        setScreen('main');
+        return;
+      }
+
+      // 3. Tab back to Home
+      if (screen === 'main' && activeTab !== 'home') {
+        setActiveTab('home');
+        return;
+      }
+
+      // 4. Onboarding screen back
+      if (screen === 'phone_auth') {
+        setScreen('welcome');
+        return;
+      }
+      if (screen === 'welcome') {
+        setScreen('language_select');
+        return;
+      }
+
+      // 5. If on home or root, exit app
+      CapApp.exitApp();
+    });
+
+    return () => {
+      backListener.then((handle) => handle.remove()).catch(() => {});
+    };
+  }, [
+    receiptModalData,
+    isAddTxOpen,
+    isScanLedgerOpen,
+    isSubscriptionOpen,
+    isShopsOpen,
+    isStaffOpen,
+    lockedFeatureName,
+    screen,
+    selectedCustomer,
+    activeTab,
+  ]);
+
+  // Native Android Deep-Link URL Listener (Google OAuth Return)
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const urlListener = CapApp.addListener('appUrlOpen', async (data) => {
+      console.log('[APP] Native app opened with URL:', data.url);
+      if (data.url && data.url.includes('auth-callback')) {
+        await Browser.close().catch(() => {});
+
+        // 1. Check hash fragment for access_token and refresh_token
+        if (data.url.includes('#')) {
+          const hash = data.url.split('#')[1];
+          const params = new URLSearchParams(hash);
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+
+          if (accessToken && refreshToken && supabase) {
+            console.log('[AUTH] Restoring session from OAuth deep link hash');
+            const { data: sessionData, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+            if (error) {
+              console.error('[AUTH] Failed to set session from deep link:', error);
+            } else if (sessionData.user) {
+              setActiveUserId(sessionData.user.id);
+              await fetchUserShop(sessionData.user.id);
+            }
+          }
+        } else if (data.url.includes('?')) {
+          // 2. Check query parameter for code
+          const search = data.url.split('?')[1];
+          const params = new URLSearchParams(search);
+          const code = params.get('code');
+          if (code && supabase) {
+            console.log('[AUTH] Exchanging auth code from deep link');
+            const { data: exchangeData, error } = await supabase.auth.exchangeCodeForSession(code);
+            if (error) {
+              console.error('[AUTH] Failed code exchange:', error);
+            } else if (exchangeData.user) {
+              setActiveUserId(exchangeData.user.id);
+              await fetchUserShop(exchangeData.user.id);
+            }
+          }
+        }
+      }
+    });
+
+    return () => {
+      urlListener.then((handle) => handle.remove()).catch(() => {});
+    };
   }, []);
 
   const fetchUserShop = async (userId: string) => {

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Language } from '../types';
 import { translations } from '../i18n/translations';
 import { supabase, isSupabaseConfigured, isDevAuth } from '../lib/supabase';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import {
   Phone,
@@ -227,16 +229,34 @@ export const PhoneAuth: React.FC<Props> = ({ language, onSuccess, onBack }) => {
                     try {
                       setLoading(true);
                       setErrorMsg('');
-                      const { error } = await supabase.auth.signInWithOAuth({
-                        provider: 'google',
-                        options: {
-                          redirectTo: window.location.origin,
-                          queryParams: {
-                            prompt: 'select_account',
+                      const isNative = Capacitor.isNativePlatform();
+                      if (isNative) {
+                        const { data, error } = await supabase.auth.signInWithOAuth({
+                          provider: 'google',
+                          options: {
+                            redirectTo: 'com.smartkhata.app://auth-callback',
+                            skipBrowserRedirect: true,
+                            queryParams: {
+                              prompt: 'select_account',
+                            },
                           },
-                        },
-                      });
-                      if (error) throw error;
+                        });
+                        if (error) throw error;
+                        if (data?.url) {
+                          await Browser.open({ url: data.url, windowName: '_self' });
+                        }
+                      } else {
+                        const { error } = await supabase.auth.signInWithOAuth({
+                          provider: 'google',
+                          options: {
+                            redirectTo: window.location.origin,
+                            queryParams: {
+                              prompt: 'select_account',
+                            },
+                          },
+                        });
+                        if (error) throw error;
+                      }
                     } catch (err: any) {
                       console.error('[AUTH] Google Sign-In Error:', err);
                       setErrorMsg(err.message || t.google_signin_error);
