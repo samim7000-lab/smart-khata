@@ -5,16 +5,16 @@ export interface ImageValidationResult {
   error?: string;
 }
 
-export const validateImageFile = (file: File): ImageValidationResult => {
+export const validateImageFile = (file: File | Blob): ImageValidationResult => {
   const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  if (!allowedTypes.includes(file.type.toLowerCase())) {
+  if (file.type && !allowedTypes.includes(file.type.toLowerCase())) {
     return {
       valid: false,
       error: 'Please select a valid image file (JPEG, PNG, or WebP).',
     };
   }
 
-  const maxSizeMB = 5;
+  const maxSizeMB = 10;
   if (file.size > maxSizeMB * 1024 * 1024) {
     return {
       valid: false,
@@ -26,7 +26,7 @@ export const validateImageFile = (file: File): ImageValidationResult => {
 };
 
 export const compressImage = (
-  file: File,
+  file: File | Blob,
   maxWidth = 800,
   maxHeight = 800,
   quality = 0.8

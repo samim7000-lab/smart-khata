@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Customer, Language, Shop, TransactionType } from '../types';
 import { translations } from '../i18n/translations';
 import { analyzeHandwrittenLedger, GeminiOcrResult, GeminiOcrItem, GeminiOcrDraft } from '../lib/geminiUtils';
@@ -9,6 +9,12 @@ import {
   resolveCustomerIdentity,
   IdentityStatus,
 } from '../lib/customerIdentityResolver';
+import { captureNativePhoto } from '../native/nativeCamera';
+import {
+  ScanWorkspaceService,
+  ScanDraft,
+  BadgeState,
+} from '../lib/scanWorkspaceService';
 import {
   Camera,
   X,
@@ -18,6 +24,7 @@ import {
   AlertTriangle,
   UserCheck,
   ArrowRight,
+  ArrowLeft,
   MinusCircle,
   PlusCircle,
   Loader2,
@@ -29,6 +36,9 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  Clock,
+  Send,
+  List,
 } from 'lucide-react';
 
 interface Props {
@@ -42,30 +52,8 @@ interface Props {
     amount: number,
     note: string,
     ledgerPhotoUrl?: string,
-    newCustomerData?: { name: string; phone: string; displayLabel: string }
+    newCustomerData?: { name: string; phone: string; displayLabel: string; address?: string }
   ) => void;
-}
-
-export type BadgeState = 'detected' | 'check' | 'manual';
-
-export interface ScanDraft {
-  id: string;
-  customerName: string;
-  phone: string;
-  amount: string;
-  type: TransactionType;
-  optionalItems: GeminiOcrItem[];
-  optionalNote: string;
-  confidence: number;
-  matchedCustomer: Customer | null;
-  isCreatingNewCust: boolean;
-  identityStatus: IdentityStatus;
-  resolutionReasons: string[];
-  candidates: Customer[];
-  nameBadge: BadgeState;
-  phoneBadge: BadgeState;
-  amountBadge: BadgeState;
-  confirmed: boolean;
 }
 
 export const ScanLedgerModal: React.FC<Props> = ({
@@ -87,10 +75,40 @@ export const ScanLedgerModal: React.FC<Props> = ({
   // Multi-entry / Bulk-Scan Batch State
   const [drafts, setDrafts] = useState<ScanDraft[]>([]);
   const [activeDraftIndex, setActiveDraftIndex] = useState(0);
+  const [viewMode, setViewMode] = useState<'list' | 'detail'>('detail');
   const [showOptionalDetails, setShowOptionalDetails] = useState(false);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  // 1. Rehydrate active Scan Workspace from storage on mount (survives WhatsApp & App restart)
+  useEffect(() => {
+    const existingWs = ScanWorkspaceService.loadWorkspace(shop.id);
+    if (existingWs && existingWs.drafts && existingWs.drafts.length > 0) {
+      setDrafts(existingWs.drafts);
+      setActiveDraftIndex(existingWs.activeDraftIndex || 0);
+      if (existingWs.drafts.length > 1) {
+        setViewMode('list');
+      } else {
+        setViewMode('detail');
+      }
+    }
+  }, [shop.id]);
+
+  // 2. Automatically sync active workspace to local storage (24-hour TTL, zero base64)
+  useEffect(() => {
+    if (drafts.length > 0) {
+      ScanWorkspaceService.saveWorkspace({
+        workspaceId: `ws-${shop.id}`,
+        shopId: shop.id,
+        createdAt: new Date().toISOString(),
+        lastUpdatedAt: new Date().toISOString(),
+        drafts,
+        activeDraftIndex,
+        status: drafts.every((d) => d.saveStatus === 'saved') ? 'completed' : 'in_progress',
+      });
+    }
+  }, [drafts, activeDraftIndex, shop.id]);
 
   // Helper: Initialize a draft card from OCR data using Canonical Identity Resolver
   const createDraftFromData = (
@@ -101,7 +119,8 @@ export const ScanLedgerModal: React.FC<Props> = ({
     txType: TransactionType | 'unknown',
     items: GeminiOcrItem[] = [],
     memo: string = '',
-    confidence: number = 0.9
+    confidence: number = 0.9,
+    existingData?: Partial<ScanDraft>
   ): ScanDraft => {
     const cleanName = name.trim();
     const cleanPhone = phone.trim();
@@ -127,6 +146,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
       : 'manual';
 
     const resolvedPhone = cleanPhone || (resolution.matchedCustomer?.phone_number || '');
+    const firstItem = items && items.length > 0 ? items[0] : null;
 
     return {
       id,
@@ -134,8 +154,12 @@ export const ScanLedgerModal: React.FC<Props> = ({
       phone: resolvedPhone,
       amount: amountNum > 0 ? String(amountNum) : '',
       type: txType === 'payment_received' ? 'payment_received' : 'credit_given',
+      productName: existingData?.productName !== undefined ? existingData.productName : (firstItem?.name || ''),
+      optionalQuantity: existingData?.optionalQuantity !== undefined ? existingData.optionalQuantity : (firstItem?.quantity || ''),
+      optionalUnitPrice: existingData?.optionalUnitPrice !== undefined ? existingData.optionalUnitPrice : (firstItem?.unit_price || ''),
+      customerAddress: existingData?.customerAddress || '',
       optionalItems: items,
-      optionalNote: memo,
+      optionalNote: existingData?.optionalNote !== undefined ? existingData.optionalNote : memo,
       confidence,
       matchedCustomer: resolution.matchedCustomer,
       isCreatingNewCust: resolution.status === 'NO_MATCH',
@@ -145,11 +169,39 @@ export const ScanLedgerModal: React.FC<Props> = ({
       nameBadge,
       phoneBadge,
       amountBadge,
-      confirmed: false,
+      confirmed: existingData?.confirmed || false,
+      saveStatus: existingData?.saveStatus || 'pending',
+      whatsappStatus: existingData?.whatsappStatus || 'pending',
+      transactionId: existingData?.transactionId,
     };
   };
 
-  // 1. Handle File Selection (Dual Camera & Gallery)
+  // 1. Direct Camera Action (Native Camera with explicit URI permissions -> Web Fallback)
+  const handleTakePhoto = async () => {
+    setInputError(null);
+    try {
+      const nativeRes = await captureNativePhoto();
+      if (nativeRes.cancelled) {
+        return;
+      }
+      if (nativeRes.blob) {
+        await processSelectedFile(nativeRes.blob);
+        return;
+      }
+      if (nativeRes.useWebFallback) {
+        cameraInputRef.current?.click();
+        return;
+      }
+      if (nativeRes.error) {
+        setInputError(nativeRes.error);
+      }
+    } catch (err: any) {
+      console.warn('[SCAN] Native camera error, falling back to web file input:', err);
+      cameraInputRef.current?.click();
+    }
+  };
+
+  // 2. Handle File Selection (Dual Camera & Gallery)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -158,10 +210,10 @@ export const ScanLedgerModal: React.FC<Props> = ({
     await processSelectedFile(file);
   };
 
-  const processSelectedFile = async (file: File) => {
+  const processSelectedFile = async (fileOrBlob: File | Blob) => {
     setInputError(null);
 
-    const validation = validateImageFile(file);
+    const validation = validateImageFile(fileOrBlob);
     if (!validation.valid) {
       setInputError(validation.error || 'Please select a valid image file (JPEG, PNG, or WebP).');
       return;
@@ -169,7 +221,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
 
     setAnalyzing(true);
     try {
-      const compressedDataUrl = await compressImage(file, 1200, 1200, 0.82);
+      const compressedDataUrl = await compressImage(fileOrBlob, 1200, 1200, 0.82);
       setImagePreview(compressedDataUrl);
       await runOcr(compressedDataUrl);
     } catch (err: any) {
@@ -179,7 +231,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
     }
   };
 
-  // 2. Run Gemini AI OCR via Real Edge Function Only
+  // 3. Run Gemini AI OCR via Real Edge Function Only
   const runOcr = async (base64Img: string) => {
     setAnalyzing(true);
     setOcrResult(null);
@@ -205,6 +257,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
             )
           );
           setDrafts(generatedDrafts);
+          setViewMode('list');
         } else {
           const singleDraft = createDraftFromData(
             'draft-1',
@@ -217,6 +270,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
             res.confidence
           );
           setDrafts([singleDraft]);
+          setViewMode('detail');
         }
       }
     } catch (err: any) {
@@ -367,17 +421,34 @@ export const ScanLedgerModal: React.FC<Props> = ({
       }
 
       const finalCustId = activeDraft.matchedCustomer?.id || `temp-${Date.now()}`;
-      let newCustPayload: { name: string; phone: string; displayLabel: string } | undefined;
+      let newCustPayload: { name: string; phone: string; displayLabel: string; address?: string } | undefined;
 
       if (!activeDraft.matchedCustomer || activeDraft.isCreatingNewCust) {
         newCustPayload = {
           name: activeDraft.customerName.trim(),
           phone: activeDraft.phone.trim(),
           displayLabel: activeDraft.customerName.trim(),
+          address: activeDraft.customerAddress?.trim() || undefined,
+        };
+      } else if (!activeDraft.matchedCustomer.address && activeDraft.customerAddress?.trim()) {
+        newCustPayload = {
+          name: activeDraft.matchedCustomer.name,
+          phone: activeDraft.matchedCustomer.phone_number || activeDraft.phone.trim(),
+          displayLabel: activeDraft.matchedCustomer.display_label || activeDraft.matchedCustomer.name,
+          address: activeDraft.customerAddress.trim(),
         };
       }
 
-      const noteText = activeDraft.optionalNote.trim() || t.scan_ledger_title;
+      // Format note with optional items / details if present
+      const itemDesc = [
+        activeDraft.productName?.trim(),
+        activeDraft.optionalQuantity ? `(Qty: ${activeDraft.optionalQuantity}${activeDraft.optionalUnitPrice ? ` @ ${activeDraft.optionalUnitPrice}` : ''})` : '',
+      ].filter(Boolean).join(' ');
+
+      const noteText = [
+        itemDesc,
+        activeDraft.optionalNote?.trim(),
+      ].filter(Boolean).join(' - ') || t.scan_ledger_title;
 
       onConfirmSave(
         finalCustId,
@@ -388,18 +459,26 @@ export const ScanLedgerModal: React.FC<Props> = ({
         newCustPayload
       );
 
-      // Mark this draft as confirmed
-      updateActiveDraft({ confirmed: true });
+      // Mark this draft as confirmed & saved
+      const updatedDrafts = drafts.map((d, i) =>
+        i === activeDraftIndex
+          ? { ...d, confirmed: true, saveStatus: 'saved' as const }
+          : d
+      );
+      setDrafts(updatedDrafts);
+      ScanWorkspaceService.markDraftSaved(activeDraft.id);
 
       // Check if there are unconfirmed drafts remaining
-      const nextUnconfirmedIdx = drafts.findIndex((d, i) => i > activeDraftIndex && !d.confirmed);
-      if (nextUnconfirmedIdx !== -1) {
-        setActiveDraftIndex(nextUnconfirmedIdx);
+      const remainingUnsaved = updatedDrafts.filter((d) => d.saveStatus !== 'saved');
+      if (remainingUnsaved.length > 0 && drafts.length > 1) {
+        // Return to batch list view so the merchant sees progress and selects next entry
+        setViewMode('list');
+      } else if (remainingUnsaved.length === 0) {
+        ScanWorkspaceService.clearWorkspace();
+        onClose();
       } else {
-        const anyUnconfirmed = drafts.find((d) => !d.confirmed);
-        if (!anyUnconfirmed) {
-          onClose();
-        }
+        ScanWorkspaceService.clearWorkspace();
+        onClose();
       }
     } catch (err: any) {
       console.error('[SCAN] Confirm save error:', err);
@@ -408,17 +487,18 @@ export const ScanLedgerModal: React.FC<Props> = ({
         finalCustId,
         activeDraft.type,
         activeAmountParsed.amount,
-        activeDraft.optionalNote.trim() || t.scan_ledger_title,
+        activeDraft.optionalNote?.trim() || t.scan_ledger_title,
         undefined,
         !activeDraft.matchedCustomer || activeDraft.isCreatingNewCust
           ? {
               name: activeDraft.customerName.trim(),
               phone: activeDraft.phone.trim(),
               displayLabel: activeDraft.customerName.trim(),
+              address: activeDraft.customerAddress?.trim() || undefined,
             }
           : undefined
       );
-      updateActiveDraft({ confirmed: true });
+      updateActiveDraft({ confirmed: true, saveStatus: 'saved' });
     } finally {
       setUploading(false);
     }
@@ -496,7 +576,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                   <button
                     type="button"
-                    onClick={() => cameraInputRef.current?.click()}
+                    onClick={handleTakePhoto}
                     className="py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center space-x-2 transition-all active:scale-[0.98]"
                   >
                     <Camera className="w-4 h-4" />
@@ -600,9 +680,192 @@ export const ScanLedgerModal: React.FC<Props> = ({
             </div>
           )}
 
-          {/* Step 4: Extracted Data Review & Confirmation */}
-          {imagePreview && !analyzing && ocrResult && ocrResult.isValidLedger && !ocrResult.error && activeDraft && (
+          {/* Step 4A: Batch Overview List View (When viewMode === 'list' && drafts.length > 1) */}
+          {imagePreview && !analyzing && ocrResult && ocrResult.isValidLedger && !ocrResult.error && drafts.length > 1 && viewMode === 'list' && (
             <div className="space-y-4 animate-in fade-in">
+              {/* Photo Proof & Retake Bar */}
+              <div className="flex items-center justify-between p-2.5 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center space-x-3">
+                  <img
+                    src={imagePreview}
+                    alt="Ledger Proof"
+                    className="w-12 h-12 object-cover rounded-xl border border-slate-300 dark:border-slate-600"
+                  />
+                  <div>
+                    <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 flex items-center">
+                      <Layers className="w-3.5 h-3.5 mr-1 text-blue-600 dark:text-blue-400" />
+                      {language === 'bn' ? `${drafts.length}টি এন্ট্রি পাওয়া গেছে` : `${drafts.length} Entries Detected`}
+                    </span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium block">
+                      {drafts.filter((d) => d.saveStatus === 'saved').length} of {drafts.length} saved
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResetPhoto}
+                  className="p-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retake</span>
+                </button>
+              </div>
+
+              {/* List of drafts */}
+              <div className="space-y-2.5">
+                {drafts.map((d, idx) => {
+                  const isSaved = d.saveStatus === 'saved';
+                  const isSent = d.whatsappStatus === 'sent';
+                  const isNeedReview =
+                    d.identityStatus === 'PHONE_CONFLICT' ||
+                    d.identityStatus === 'AMBIGUOUS' ||
+                    !d.customerName ||
+                    d.phone.replace(/\D/g, '').length < 10;
+
+                  return (
+                    <div
+                      key={d.id}
+                      className={`p-3.5 rounded-2xl border transition-all ${
+                        isSaved
+                          ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60'
+                          : isNeedReview
+                          ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/60'
+                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center space-x-2 flex-wrap mb-1">
+                            <span className="text-[11px] font-black px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                              #{idx + 1}
+                            </span>
+                            <span className="font-extrabold text-sm text-slate-900 dark:text-white truncate">
+                              {d.customerName || '(No Name)'}
+                            </span>
+                            {/* Status Badges */}
+                            {isSent && (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
+                                <Send className="w-2.5 h-2.5" />
+                                <span>✓ Sent</span>
+                              </span>
+                            )}
+                            {isSaved && !isSent && (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
+                                <Check className="w-2.5 h-2.5" />
+                                <span>✓ Saved</span>
+                              </span>
+                            )}
+                            {!isSaved && isNeedReview && (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300">
+                                <AlertTriangle className="w-2.5 h-2.5" />
+                                <span>⚠ Review</span>
+                              </span>
+                            )}
+                            {!isSaved && !isNeedReview && (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200">
+                                <span>Ready</span>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
+                            {d.phone && (
+                              <div className="flex items-center space-x-1 font-medium">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                <span>{d.phone}</span>
+                              </div>
+                            )}
+                            {d.productName && (
+                              <div className="text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate">
+                                📦 {d.productName} {d.optionalQuantity ? `(Qty: ${d.optionalQuantity})` : ''}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div
+                            className={`font-black text-base ${
+                              d.type === 'credit_given'
+                                ? 'text-red-600 dark:text-red-400'
+                                : 'text-green-600 dark:text-green-400'
+                            }`}
+                          >
+                            {d.type === 'credit_given' ? '+' : '-'}
+                            {curr} {d.amount || '0'}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveDraftIndex(idx);
+                              setViewMode('detail');
+                            }}
+                            className={`mt-1.5 px-3 py-1 rounded-xl text-xs font-black transition-all ${
+                              isSaved
+                                ? 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-300'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
+                            }`}
+                          >
+                            {isSaved ? 'View' : 'Review & Save →'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Bottom Action: Done or Clear */}
+              <div className="pt-2 flex items-center space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    ScanWorkspaceService.clearWorkspace();
+                    onClose();
+                  }}
+                  className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl transition-colors"
+                >
+                  {drafts.every((d) => d.saveStatus === 'saved') ? 'Done' : 'Discard Batch'}
+                </button>
+                {drafts.some((d) => d.saveStatus !== 'saved') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const firstPending = drafts.findIndex((d) => d.saveStatus !== 'saved');
+                      if (firstPending !== -1) {
+                        setActiveDraftIndex(firstPending);
+                        setViewMode('detail');
+                      }
+                    }}
+                    className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
+                  >
+                    Continue Reviewing →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Step 4B: Extracted Data Review & Confirmation (Detail Mode) */}
+          {imagePreview && !analyzing && ocrResult && ocrResult.isValidLedger && !ocrResult.error && activeDraft && (viewMode === 'detail' || drafts.length === 1) && (
+            <div className="space-y-4 animate-in fade-in">
+              {/* Back to list button if multi-draft */}
+              {drafts.length > 1 && (
+                <div className="flex items-center justify-between pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('list')}
+                    className="text-xs font-black text-blue-600 dark:text-blue-400 flex items-center space-x-1.5 hover:underline"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>← {language === 'bn' ? `সব এন্ট্রি দেখুন (${drafts.length})` : `All Entries (${drafts.length})`}</span>
+                  </button>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    Entry {activeDraftIndex + 1} of {drafts.length}
+                  </span>
+                </div>
+              )}
+
               {/* Photo Proof & Retake Bar */}
               <div className="flex items-center justify-between p-2.5 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
                 <div className="flex items-center space-x-3">
@@ -639,9 +902,14 @@ export const ScanLedgerModal: React.FC<Props> = ({
                       <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 mr-1" />
                       <span>Batch Entries Detected ({drafts.length} entries)</span>
                     </span>
-                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-300">
-                      Entry {activeDraftIndex + 1} of {drafts.length}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('list')}
+                      className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-300 flex items-center space-x-1 hover:underline"
+                    >
+                      <List className="w-3 h-3" />
+                      <span>View List</span>
+                    </button>
                   </div>
                   <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
                     {drafts.map((d, idx) => (
@@ -1001,7 +1269,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 );
               })()}
 
-              {/* Collapsible Optional Details Drawer (Items & Notes) */}
+              {/* Collapsible Optional Details Drawer (Problem 2: Product name, Qty, Unit Price, Address, Note) */}
               <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden bg-slate-50 dark:bg-slate-800/50">
                 <button
                   type="button"
@@ -1009,10 +1277,14 @@ export const ScanLedgerModal: React.FC<Props> = ({
                   className="w-full p-3 flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                   <span className="flex items-center space-x-1.5">
-                    <span>Optional Details (Items & Note)</span>
-                    {activeDraft.optionalItems.length > 0 && (
+                    <span>
+                      {language === 'bn'
+                        ? 'অতিরিক্ত তথ্য (ঐচ্ছিক - পণ্য, পরিমাণ, ঠিকানা)'
+                        : 'More details (Optional - Item, Qty, Address)'}
+                    </span>
+                    {(activeDraft.productName || activeDraft.customerAddress || (activeDraft.optionalItems && activeDraft.optionalItems.length > 0)) && (
                       <span className="bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 px-1.5 py-0.5 rounded-md text-[10px]">
-                        {activeDraft.optionalItems.length} items
+                        ✓ Added
                       </span>
                     )}
                   </span>
@@ -1020,12 +1292,68 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 </button>
 
                 {showOptionalDetails && (
-                  <div className="p-3 pt-0 space-y-2.5 border-t border-slate-200 dark:border-slate-700 animate-in fade-in">
-                    {/* Itemized Items */}
-                    {activeDraft.optionalItems.length > 0 && (
+                  <div className="p-3 pt-0 space-y-3 border-t border-slate-200 dark:border-slate-700 animate-in fade-in">
+                    {/* Product / Item Name */}
+                    <div>
+                      <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">
+                        {language === 'bn' ? 'পণ্যের নাম / কী কেনা হয়েছে (ঐচ্ছিক)' : 'Product / Item Name (Optional)'}
+                      </label>
+                      <input
+                        type="text"
+                        value={activeDraft.productName || ''}
+                        onChange={(e) => updateActiveDraft({ productName: e.target.value })}
+                        placeholder={language === 'bn' ? 'যেমন: আলু, চাল ২৫ কেজি, সিমেন্ট...' : 'e.g. Potato, Rice 25kg, Cement...'}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:border-blue-600 outline-none"
+                      />
+                    </div>
+
+                    {/* Quantity & Unit Price in 2 Columns */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">
+                          {language === 'bn' ? 'পরিমাণ (ঐচ্ছিক)' : 'Quantity (Optional)'}
+                        </label>
+                        <input
+                          type="text"
+                          value={activeDraft.optionalQuantity || ''}
+                          onChange={(e) => updateActiveDraft({ optionalQuantity: e.target.value })}
+                          placeholder={language === 'bn' ? 'যেমন: ৫ কেজি, ২ ব্যাগ' : 'e.g. 5 kg, 2 bags'}
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:border-blue-600 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">
+                          {language === 'bn' ? 'দর / ইউনিট রেট (ঐচ্ছিক)' : 'Unit Price (Optional)'}
+                        </label>
+                        <input
+                          type="text"
+                          value={activeDraft.optionalUnitPrice || ''}
+                          onChange={(e) => updateActiveDraft({ optionalUnitPrice: e.target.value })}
+                          placeholder="e.g. 40, 1200"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:border-blue-600 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Customer Address */}
+                    <div>
+                      <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">
+                        {language === 'bn' ? 'কাস্টমারের ঠিকানা (ঐচ্ছিক)' : 'Customer Address (Optional)'}
+                      </label>
+                      <input
+                        type="text"
+                        value={activeDraft.customerAddress || ''}
+                        onChange={(e) => updateActiveDraft({ customerAddress: e.target.value })}
+                        placeholder={language === 'bn' ? 'যেমন: গ্রাম: রামপুর, পোস্ট অফিসের কাছে' : 'e.g. Vill: Rampur, Near Post Office'}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:border-blue-600 outline-none"
+                      />
+                    </div>
+
+                    {/* Detected Items */}
+                    {activeDraft.optionalItems && activeDraft.optionalItems.length > 0 && (
                       <div className="space-y-1">
                         <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider block">
-                          Detected Items
+                          Detected Items ({activeDraft.optionalItems.length})
                         </span>
                         <div className="space-y-1">
                           {activeDraft.optionalItems.map((it, idx) => (
@@ -1048,7 +1376,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
                       </label>
                       <input
                         type="text"
-                        value={activeDraft.optionalNote}
+                        value={activeDraft.optionalNote || ''}
                         onChange={(e) => updateActiveDraft({ optionalNote: e.target.value })}
                         placeholder={t.note_optional}
                         className="w-full px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:border-blue-600 outline-none"

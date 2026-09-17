@@ -35,6 +35,7 @@ import { getLedgerPhotoSignedUrl } from '../lib/imageUtils';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { WhatsAppExperimentLabModal } from './WhatsAppExperimentLabModal';
 import { saveReceiptImageToDevice } from '../native/mediaSaver';
+import { ScanWorkspaceService } from '../lib/scanWorkspaceService';
 
 interface Props {
   transaction: Transaction;
@@ -240,6 +241,9 @@ export const ReceiptModal: React.FC<Props> = ({
 
     if (res.success) {
       setToastMsg(res.statusMessage);
+      if (transaction.id) {
+        ScanWorkspaceService.markDraftSentByTransactionId(transaction.id);
+      }
     } else {
       setToastMsg('⚠️ ' + (res.statusMessage || 'Failed to open WhatsApp'));
     }

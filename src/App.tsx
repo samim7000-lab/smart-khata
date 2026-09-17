@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Customer, Language, Shop, Transaction, TransactionType } from './types';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { LanguageSelector } from './components/LanguageSelector';
@@ -29,6 +29,7 @@ import { AIRecoveryDashboard } from './components/AIRecoveryDashboard';
 import { SmartKhataLogo } from './components/SmartKhataLogo';
 import { PlanTier, ReceiptDetailsPayload } from './types';
 import { packReceiptNote } from './lib/receiptUtils';
+import { ScanWorkspaceService } from './lib/scanWorkspaceService';
 import {
   isSupabaseConfigured,
   isDevAuth,
@@ -48,14 +49,15 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { Browser } from '@capacitor/browser';
 
 // Helper to validate canonical PostgreSQL UUID string format
-const isValidUuid = (val?: string | null): boolean => {
-  if (!val) return false;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+const isValidUuid = (id?: string | null): boolean => {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 };
 
 export const App: React.FC = () => {
   // Guard to prevent concurrent/duplicate transaction saves
   const isSavingTxRef = React.useRef(false);
+  const isFetchingShopRef = React.useRef(false);
 
   // Auth Session Initialization State (Prevents race conditions on Google OAuth redirect)
   const [isAuthInitializing, setIsAuthInitializing] = useState<boolean>(true);
@@ -154,11 +156,15 @@ export const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<NavTab>('home');
 
-  // In Supabase mode, shop starts null until resolved from database via fetchUserShop
+  // Synchronous profile hydration to eliminate startup layout shift and prevent plan reset to FREE
   const [shop, setShop] = useState<Shop | null>(() => {
-    if (isSupabaseConfigured && supabase) {
-      return null;
-    }
+    try {
+      const cached = localStorage.getItem('smart_khata_cached_shop');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.id) return parsed;
+      }
+    } catch {}
     return getStoredMockShop();
   });
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -349,6 +355,11 @@ export const App: React.FC = () => {
             saveGoogleMetadata(session.user);
             setActiveUserId(session.user.id);
 
+            if (event === 'INITIAL_SESSION') {
+              console.log('[AUTH] INITIAL_SESSION handled without redundant query.');
+              return;
+            }
+
             if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
               console.log(`[AUTH] Background ${event} handled without UI reset.`);
               setIsAuthInitializing(false);
@@ -515,81 +526,109 @@ export const App: React.FC = () => {
   }, []);
 
   const fetchUserShop = async (userId: string) => {
-    console.log(`[AUTH] user.id = ${userId}`);
-    console.log(`[SHOP] querying owner_id = ${userId}`);
-    const savedLang = (localStorage.getItem('smart_khata_lang') as Language) || null;
+    if (isFetchingShopRef.current) {
+      console.log(`[SHOP] fetchUserShop already in progress for ${userId}, skipping duplicate query.`);
+      return;
+    }
+    isFetchingShopRef.current = true;
+    try {
+      console.log(`[AUTH] user.id = ${userId}`);
+      console.log(`[SHOP] querying owner_id = ${userId}`);
+      const savedLang = (localStorage.getItem('smart_khata_lang') as Language) || null;
 
-    if (isSupabaseConfigured && supabase) {
+      // Hydrate cached profile so we don't lose custom fields or PRO plan
+      let cachedProfile: Partial<Shop> | null = null;
       try {
-        const { data: shopRows, error } = await supabase
-          .from('shops')
-          .select('*')
-          .eq('owner_id', userId)
-          .is('deleted_at', null)
-          .order('created_at', { ascending: false });
+        const raw =
+          localStorage.getItem(`smart_khata_shop_profile_${userId}`) ||
+          localStorage.getItem('smart_khata_cached_shop');
+        if (raw) cachedProfile = JSON.parse(raw);
+      } catch {}
 
-        if (error) {
-          console.error('[SHOP] Error querying public.shops:', error.message);
-          setLastShopError(error.message);
-        } else {
-          setLastShopError(null);
-        }
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data: shopRows, error } = await supabase
+            .from('shops')
+            .select('*')
+            .eq('owner_id', userId)
+            .is('deleted_at', null)
+            .order('created_at', { ascending: false });
 
-        if (shopRows && shopRows.length > 0) {
-          const primaryShopRecord = shopRows[0];
-          console.log(`[SHOP] found shop.id = ${primaryShopRecord.id}, owner_id = ${primaryShopRecord.owner_id}, shop_name = ${primaryShopRecord.shop_name}`);
-
-          const normalizedPhone = primaryShopRecord.phone || primaryShopRecord.whatsapp_number || '';
-          const normalizedWhatsapp = primaryShopRecord.whatsapp_number || primaryShopRecord.phone || normalizedPhone;
-          const normalizedCountry = primaryShopRecord.country || 'BD';
-          const normalizedCurrency = primaryShopRecord.currency_code || (normalizedCountry === 'BD' ? 'BDT' : 'INR');
-
-          const dbShop: Shop = {
-            ...primaryShopRecord,
-            country: normalizedCountry,
-            currency_code: normalizedCurrency,
-            phone: normalizedPhone,
-            whatsapp_number: normalizedWhatsapp,
-          };
-
-          setShop(dbShop);
-          saveMockShop(dbShop);
-
-          const effectiveLang = savedLang || (primaryShopRecord.preferred_language as Language) || 'bn';
-          setLanguage(effectiveLang);
-          localStorage.setItem('smart_khata_lang', effectiveLang);
-
-          const isComplete = isShopProfileComplete(dbShop);
-          console.log(`[PROFILE] complete = ${isComplete}`);
-
-          if (isComplete) {
-            console.log('[ROUTE] Dashboard');
-            setScreen('main');
-            loadSupabaseData(dbShop.id);
+          if (error) {
+            console.error('[SHOP] Error querying public.shops:', error.message);
+            setLastShopError(error.message);
           } else {
+            setLastShopError(null);
+          }
+
+          if (shopRows && shopRows.length > 0) {
+            const primaryShopRecord = shopRows[0];
+            console.log(`[SHOP] found shop.id = ${primaryShopRecord.id}, owner_id = ${primaryShopRecord.owner_id}, shop_name = ${primaryShopRecord.shop_name}`);
+
+            const normalizedPhone = primaryShopRecord.phone || primaryShopRecord.whatsapp_number || '';
+            const normalizedWhatsapp = primaryShopRecord.whatsapp_number || primaryShopRecord.phone || normalizedPhone;
+            const normalizedCountry = primaryShopRecord.country || 'BD';
+            const normalizedCurrency = primaryShopRecord.currency_code || (normalizedCountry === 'BD' ? 'BDT' : 'INR');
+
+            // CRITICAL PLAN PRESERVATION: Preserve PRO / ENTERPRISE status across reloads
+            const resolvedPlanTier: PlanTier =
+              primaryShopRecord.plan_tier || cachedProfile?.plan_tier || 'free';
+
+            const dbShop: Shop = {
+              ...cachedProfile,
+              ...primaryShopRecord,
+              country: normalizedCountry,
+              currency_code: normalizedCurrency,
+              phone: normalizedPhone,
+              whatsapp_number: normalizedWhatsapp,
+              plan_tier: resolvedPlanTier,
+              logo_url: primaryShopRecord.logo_url || cachedProfile?.logo_url,
+              signature_url: primaryShopRecord.signature_url || cachedProfile?.signature_url,
+              shop_photo_url: primaryShopRecord.shop_photo_url || cachedProfile?.shop_photo_url,
+            };
+
+            setShop(dbShop);
+            saveMockShop(dbShop);
+            localStorage.setItem(`smart_khata_shop_profile_${userId}`, JSON.stringify(dbShop));
+
+            const effectiveLang = savedLang || (primaryShopRecord.preferred_language as Language) || 'bn';
+            setLanguage(effectiveLang);
+            localStorage.setItem('smart_khata_lang', effectiveLang);
+
+            const isComplete = isShopProfileComplete(dbShop);
+            console.log(`[PROFILE] complete = ${isComplete}`);
+
+            if (isComplete) {
+              console.log('[ROUTE] Dashboard');
+              setScreen('main');
+              loadSupabaseData(dbShop.id);
+            } else {
+              console.log('[ROUTE] ShopSetup');
+              setScreen('shop_setup');
+            }
+          } else {
+            console.log(`[SHOP] no shop found in DB for owner_id = ${userId}`);
+            console.log('[PROFILE] complete = false');
             console.log('[ROUTE] ShopSetup');
+            setShop(null);
             setScreen('shop_setup');
           }
-        } else {
-          console.log(`[SHOP] no shop found in DB for owner_id = ${userId}`);
-          console.log('[PROFILE] complete = false');
-          console.log('[ROUTE] ShopSetup');
+        } catch (err) {
+          console.error('[SHOP] Exception fetching user shop:', err);
           setShop(null);
           setScreen('shop_setup');
         }
-      } catch (err) {
-        console.error('[SHOP] Exception fetching user shop:', err);
-        setShop(null);
-        setScreen('shop_setup');
-      }
-    } else {
-      const localShop = getStoredMockShop();
-      if (localShop && isShopProfileComplete(localShop)) {
-        setShop(localShop);
-        setScreen('main');
       } else {
-        setScreen('shop_setup');
+        const localShop = getStoredMockShop();
+        if (localShop && isShopProfileComplete(localShop)) {
+          setShop(localShop);
+          setScreen('main');
+        } else {
+          setScreen('shop_setup');
+        }
       }
+    } finally {
+      isFetchingShopRef.current = false;
     }
   };
 
@@ -988,6 +1027,9 @@ export const App: React.FC = () => {
             if (newCustomerData?.state && newCustomerData.state.trim()) {
               custPayload.state = newCustomerData.state.trim();
             }
+            if (newCustomerData?.address && newCustomerData.address.trim()) {
+              custPayload.address = newCustomerData.address.trim();
+            }
 
             const { data, error } = await supabase
               .from('customers')
@@ -1012,6 +1054,7 @@ export const App: React.FC = () => {
             name: newCustomerData?.name || 'Customer',
             phone_number: newCustomerData?.phone || '',
             display_label: newCustomerData?.displayLabel || 'Customer',
+            address: newCustomerData?.address?.trim() || undefined,
             created_at: new Date().toISOString(),
             balance: 0,
           };
@@ -1587,7 +1630,15 @@ export const App: React.FC = () => {
           shop={shop}
           language={language}
           transactions={transactions}
-          onClose={() => setReceiptModalData(null)}
+          onClose={() => {
+            setReceiptModalData(null);
+            if (shop && ScanWorkspaceService.hasActiveWorkspace(shop.id)) {
+              const ws = ScanWorkspaceService.loadWorkspace(shop.id);
+              if (ws && ws.drafts.some((d) => d.saveStatus !== 'saved')) {
+                setIsScanLedgerOpen(true);
+              }
+            }
+          }}
           onUpdateCustomer={(updated) => {
             setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
             setReceiptModalData((prev) => (prev ? { ...prev, customer: updated } : null));

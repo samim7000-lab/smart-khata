@@ -19,6 +19,7 @@ import {
 
 import { formatShopCurrency } from '../lib/countryPricing';
 import { isFeatureEnabled } from '../lib/featureFlags';
+import { ScanWorkspaceService } from '../lib/scanWorkspaceService';
 
 interface Props {
   shop: Shop;
@@ -77,6 +78,19 @@ export const Dashboard: React.FC<Props> = ({
   const recentTransactions = useMemo(() => {
     return transactions.slice(0, 4);
   }, [transactions]);
+
+  // Detect in-progress multi-scan batch for quick resume
+  const activeBatch = useMemo(() => {
+    if (!shop?.id) return null;
+    const ws = ScanWorkspaceService.loadWorkspace(shop.id);
+    if (!ws || !ws.drafts || ws.drafts.length === 0) return null;
+    const pendingCount = ws.drafts.filter((d) => d.saveStatus !== 'saved').length;
+    if (pendingCount === 0) return null;
+    return {
+      total: ws.drafts.length,
+      pending: pendingCount,
+    };
+  }, [shop?.id]);
 
   const filteredCustomers = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -142,6 +156,35 @@ export const Dashboard: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* In-Progress Scan Batch Quick Resume Banner */}
+      {activeBatch && (
+        <div className="bg-gradient-to-r from-blue-500/15 to-indigo-500/15 dark:from-blue-900/30 dark:to-indigo-900/30 border-2 border-blue-500/40 dark:border-blue-700/60 p-3.5 rounded-2xl flex items-center justify-between shadow-sm animate-in fade-in">
+          <div className="flex items-center space-x-2.5 min-w-0 flex-1 pr-2">
+            <div className="p-2 bg-blue-600 text-white rounded-xl shrink-0">
+              <Sparkles className="w-4 h-4 text-amber-300" />
+            </div>
+            <div className="min-w-0">
+              <div className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                {language === 'bn'
+                  ? `অসম্পূর্ণ AI স্ক্যান ব্যাচ (${activeBatch.pending}টি বাকি)`
+                  : `In-Progress AI Scan Batch (${activeBatch.pending} remaining)`}
+              </div>
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold truncate">
+                {language === 'bn'
+                  ? 'আপনার আগের স্ক্যানের এন্ট্রিগুলো নিরাপদে সংরক্ষিত আছে।'
+                  : 'Unsaved entries from your previous scan are safely preserved.'}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onOpenScanLedger}
+            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow transition-all active:scale-[0.98] shrink-0"
+          >
+            {language === 'bn' ? 'চালিয়ে যান →' : 'Resume Batch →'}
+          </button>
+        </div>
+      )}
+
       {/* Quick Actions Bar */}
       <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
         <span className="text-xs font-extrabold text-slate-700 dark:text-slate-300 uppercase tracking-wider pl-1">
@@ -150,7 +193,19 @@ export const Dashboard: React.FC<Props> = ({
         <div className="flex items-center space-x-2">
           <button
             onClick={() => {
-              const isEntitled = isFeatureEnabled('ocr_scanner', shop?.plan_tier || 'free');
+              let activeTier = shop?.plan_tier;
+              if (!activeTier) {
+                try {
+                  const cached =
+                    localStorage.getItem(`smart_khata_shop_profile_${shop?.owner_id}`) ||
+                    localStorage.getItem('smart_khata_cached_shop');
+                  if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (parsed?.plan_tier) activeTier = parsed.plan_tier;
+                  }
+                } catch {}
+              }
+              const isEntitled = isFeatureEnabled('ocr_scanner', activeTier || 'free');
               if (isEntitled) {
                 onOpenScanLedger();
               } else if (onOpenUpgrade) {

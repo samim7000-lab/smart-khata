@@ -18,6 +18,8 @@ import android.provider.MediaStore;
 import android.util.Base64;
 import android.util.Log;
 
+import android.content.ClipData;
+import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 
 import com.getcapacitor.JSArray;
@@ -25,13 +27,18 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.net.URLEncoder;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 @CapacitorPlugin(name = "WhatsAppIntent")
 public class WhatsAppIntentPlugin extends Plugin {
@@ -418,6 +425,106 @@ public class WhatsAppIntentPlugin extends Plugin {
         } catch (Exception ex) {
             Log.e(TAG, "Error saving receipt image to Gallery", ex);
             call.reject("Error saving image to Gallery: " + ex.getMessage());
+        }
+    }
+
+    private Uri currentCameraPhotoUri = null;
+    private File currentCameraPhotoFile = null;
+
+    /**
+     * NATIVE ANDROID CAMERA CAPTURE
+     * Bypasses fragile WebView file chooser by directly launching MediaStore.ACTION_IMAGE_CAPTURE
+     * with explicit FileProvider URI permission grants (including setClipData and grantUriPermission).
+     * Zero runtime permissions required.
+     */
+    @PluginMethod
+    public void capturePhoto(PluginCall call) {
+        Context context = getContext();
+        Activity activity = getActivity();
+        if (activity == null || context == null) {
+            call.reject("Activity or Context is null");
+            return;
+        }
+
+        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        if (takePictureIntent.resolveActivity(activity.getPackageManager()) == null) {
+            call.reject("No camera application available on this device");
+            return;
+        }
+
+        try {
+            String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+            String imageFileName = "LEDGER_" + timeStamp + "_";
+            File storageDir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+            if (storageDir == null) {
+                storageDir = context.getCacheDir();
+            }
+            currentCameraPhotoFile = File.createTempFile(imageFileName, ".jpg", storageDir);
+            currentCameraPhotoUri = FileProvider.getUriForFile(
+                activity,
+                context.getPackageName() + ".fileprovider",
+                currentCameraPhotoFile
+            );
+
+            takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, currentCameraPhotoUri);
+            takePictureIntent.setClipData(ClipData.newRawUri("", currentCameraPhotoUri));
+            takePictureIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            // Explicitly grant URI permission to all packages that can handle ACTION_IMAGE_CAPTURE
+            List<ResolveInfo> resInfoList = activity.getPackageManager().queryIntentActivities(
+                takePictureIntent,
+                PackageManager.MATCH_DEFAULT_ONLY
+            );
+            for (ResolveInfo resolveInfo : resInfoList) {
+                String packageName = resolveInfo.activityInfo.packageName;
+                activity.grantUriPermission(
+                    packageName,
+                    currentCameraPhotoUri,
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION
+                );
+            }
+
+            startActivityForResult(call, takePictureIntent, "processCameraResult");
+        } catch (Exception ex) {
+            Log.e(TAG, "Error launching native camera", ex);
+            call.reject("Error launching camera: " + ex.getMessage());
+        }
+    }
+
+    @ActivityCallback
+    public void processCameraResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+
+        if (result.getResultCode() == Activity.RESULT_OK) {
+            try {
+                if (currentCameraPhotoFile != null && currentCameraPhotoFile.exists() && currentCameraPhotoFile.length() > 0) {
+                    byte[] buffer = new byte[(int) currentCameraPhotoFile.length()];
+                    try (FileInputStream fis = new FileInputStream(currentCameraPhotoFile)) {
+                        int read = fis.read(buffer);
+                        if (read <= 0) {
+                            call.reject("Captured image file was empty");
+                            return;
+                        }
+                    }
+                    String base64Image = Base64.encodeToString(buffer, Base64.NO_WRAP);
+                    JSObject res = new JSObject();
+                    res.put("success", true);
+                    res.put("format", "jpeg");
+                    res.put("dataUrl", "data:image/jpeg;base64," + base64Image);
+                    call.resolve(res);
+                } else {
+                    call.reject("Captured image file was empty or missing");
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, "Failed to read captured camera image", ex);
+                call.reject("Failed to read captured image: " + ex.getMessage());
+            }
+        } else {
+            // User cancelled or exited camera
+            JSObject res = new JSObject();
+            res.put("success", false);
+            res.put("cancelled", true);
+            call.resolve(res);
         }
     }
 }
