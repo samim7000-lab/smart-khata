@@ -105,7 +105,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
     setAnalyzing(true);
     setOcrResult(null);
     try {
-      const res = await analyzeHandwrittenLedger(base64Img);
+      const res = await analyzeHandwrittenLedger(base64Img, 30000, shop.id);
       setOcrResult(res);
       if (res.isValidLedger && !res.error) {
         setEditedName(res.customerName || '');

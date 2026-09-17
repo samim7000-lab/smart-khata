@@ -123,7 +123,8 @@ export const uploadShopAsset = async (
 
 /**
  * Uploads handwritten ledger proof photo to Supabase Storage ('ledger_photos' bucket).
- * Returns the public CDN URL to store in transactions.ledger_photo_url.
+ * Bucket is private (public = false).
+ * Returns the object path inside the bucket (e.g. `${shopId}/ledger_${Date.now()}_${random}.jpg`).
  * Falls back gracefully if storage is unconfigured.
  */
 export const uploadLedgerPhotoProof = async (
@@ -158,13 +159,13 @@ export const uploadLedgerPhotoProof = async (
 
     if (error) {
       console.warn('[STORAGE] Upload to ledger_photos failed, falling back:', error.message);
-      // Fallback to shop-assets if ledger_photos bucket does not exist
+      // Fallback to shop-assets if ledger_photos bucket upload fails
       const fallbackUpload = await supabase.storage
         .from('shop-assets')
         .upload(`ledger_${fileName}`, blob, { contentType: 'image/jpeg', upsert: true });
 
       if (fallbackUpload.error) {
-        console.warn('[STORAGE] Fallback upload also failed, using compact thumbnail string:', fallbackUpload.error.message);
+        console.warn('[STORAGE] Fallback upload also failed:', fallbackUpload.error.message);
         return '';
       }
       const { data: publicUrlData } = supabase.storage
@@ -173,13 +174,77 @@ export const uploadLedgerPhotoProof = async (
       return publicUrlData.publicUrl;
     }
 
-    const { data: publicUrlData } = supabase.storage
-      .from('ledger_photos')
-      .getPublicUrl(data.path);
-
-    return publicUrlData.publicUrl;
+    // Return the persistent relative path within the private bucket
+    return data.path;
   } catch (err) {
     console.error('[STORAGE] Error uploading ledger photo proof:', err);
     return '';
+  }
+};
+
+/**
+ * Generates an authenticated signed URL for private ledger proof photos.
+ * Preserves 100% backward compatibility for:
+ * - Data URLs (data:image/...)
+ * - Blob URLs (blob:...)
+ * - Legacy public Supabase URLs (https://.../storage/v1/object/public/ledger_photos/...)
+ * - Legacy signed Supabase URLs (https://.../storage/v1/object/sign/ledger_photos/...)
+ * - Non-ledger external or shop-assets URLs
+ * - Relative paths (${shopId}/ledger_....jpg)
+ */
+export const getLedgerPhotoSignedUrl = async (
+  rawUrlOrPath: string,
+  expiresInSeconds: number = 86400
+): Promise<string> => {
+  if (!rawUrlOrPath || typeof rawUrlOrPath !== 'string') return '';
+
+  const clean = rawUrlOrPath.trim();
+  if (!clean) return '';
+
+  // 1. Data URLs or local blob URLs: return immediately
+  if (clean.startsWith('data:') || clean.startsWith('blob:')) {
+    return clean;
+  }
+
+  // 2. If Supabase is not configured, return as is
+  if (!isSupabaseConfigured || !supabase) {
+    return clean;
+  }
+
+  try {
+    let objectPath = clean;
+
+    const publicPrefix = '/storage/v1/object/public/ledger_photos/';
+    const signPrefix = '/storage/v1/object/sign/ledger_photos/';
+
+    if (objectPath.includes(publicPrefix)) {
+      objectPath = objectPath.split(publicPrefix)[1];
+    } else if (objectPath.includes(signPrefix)) {
+      objectPath = objectPath.split(signPrefix)[1].split('?')[0];
+    } else if (objectPath.startsWith('ledger_photos/')) {
+      objectPath = objectPath.replace(/^ledger_photos\//, '');
+    }
+
+    // If it's a URL to shop-assets or another external host (not ledger_photos), return as is
+    if (objectPath.startsWith('http://') || objectPath.startsWith('https://')) {
+      return objectPath;
+    }
+
+    // Clean any leading slash
+    objectPath = objectPath.replace(/^\/+/, '');
+
+    const { data, error } = await supabase.storage
+      .from('ledger_photos')
+      .createSignedUrl(objectPath, expiresInSeconds);
+
+    if (error || !data?.signedUrl) {
+      console.warn('[STORAGE] createSignedUrl failed for ledger proof:', error?.message);
+      return clean;
+    }
+
+    return data.signedUrl;
+  } catch (err) {
+    console.warn('[STORAGE] Exception in getLedgerPhotoSignedUrl:', err);
+    return clean;
   }
 };

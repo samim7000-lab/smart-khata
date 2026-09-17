@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Customer, Language, Shop, Transaction } from '../types';
 import { translations } from '../i18n/translations';
 import html2canvas from 'html2canvas';
@@ -31,6 +31,7 @@ import { dispatchWhatsApp, validateCustomerPhone, buildWhatsAppMessage } from '.
 import { formatShopCurrency } from '../lib/countryPricing';
 import { unpackReceiptNote, calculatePreviousBalance } from '../lib/receiptUtils';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { getLedgerPhotoSignedUrl } from '../lib/imageUtils';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { WhatsAppExperimentLabModal } from './WhatsAppExperimentLabModal';
 
@@ -63,6 +64,23 @@ export const ReceiptModal: React.FC<Props> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLabOpen, setIsLabOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+  const [resolvedProofUrl, setResolvedProofUrl] = useState<string>('');
+
+  useEffect(() => {
+    let isMounted = true;
+    if (transaction.ledger_photo_url) {
+      getLedgerPhotoSignedUrl(transaction.ledger_photo_url).then((url) => {
+        if (isMounted) {
+          setResolvedProofUrl(url || transaction.ledger_photo_url || '');
+        }
+      });
+    } else {
+      setResolvedProofUrl('');
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [transaction.ledger_photo_url]);
 
   // Development / Debug Gate for Experimental WhatsApp Lab
   // Exposes lab only in local development (Vite dev) or when ?debug_wa=true or localStorage flag is explicitly set
@@ -710,22 +728,22 @@ export const ReceiptModal: React.FC<Props> = ({
                   <span>{language === 'bn' ? 'সংযুক্ত খাতা পৃষ্ঠার ছবি' : language === 'hi' ? 'संलग्न खाता पृष्ठ' : 'Attached Ledger Photo Proof'}</span>
                 </span>
                 <a
-                  href={transaction.ledger_photo_url}
+                  href={resolvedProofUrl || transaction.ledger_photo_url}
                   target="_blank"
                   rel="noreferrer"
                   className="text-[11px] font-bold text-blue-600 hover:underline"
                 >
-                  {language === 'bn' ? 'বড় করে দেখুন' : language === 'hi' ? 'बड़ा देखें' : 'View Full Image'} ↗
+                  {language === 'bn' ? 'বড় করে দেখুন' : language === 'hi' ? 'বड़ा देखें' : 'View Full Image'} ↗
                 </a>
               </div>
               <a
-                href={transaction.ledger_photo_url}
+                href={resolvedProofUrl || transaction.ledger_photo_url}
                 target="_blank"
                 rel="noreferrer"
                 className="block overflow-hidden rounded-xl border border-slate-200 hover:opacity-95 transition-opacity max-w-xs"
               >
                 <img
-                  src={transaction.ledger_photo_url}
+                  src={resolvedProofUrl || transaction.ledger_photo_url}
                   alt="Scanned Ledger Proof"
                   crossOrigin="anonymous"
                   className="w-full max-h-36 object-cover rounded-xl"

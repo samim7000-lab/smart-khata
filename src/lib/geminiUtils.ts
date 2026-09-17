@@ -23,7 +23,8 @@ export interface GeminiOcrResult {
  */
 export const analyzeHandwrittenLedger = async (
   imageBase64: string,
-  timeoutMs: number = 30000
+  timeoutMs: number = 30000,
+  shopId?: string
 ): Promise<GeminiOcrResult> => {
   // Strip prefix data URL scheme if present (e.g. data:image/jpeg;base64,...)
   let cleanBase64 = imageBase64;
@@ -47,6 +48,7 @@ export const analyzeHandwrittenLedger = async (
         body: {
           imageBase64: cleanBase64,
           mimeType,
+          shopId: shopId || undefined,
         },
       });
 

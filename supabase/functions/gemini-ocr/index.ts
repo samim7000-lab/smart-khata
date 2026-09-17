@@ -40,8 +40,11 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
 
+    let authenticatedUser: any = null;
+    let supabaseClient: any = null;
+
     if (supabaseUrl && supabaseAnonKey) {
-      const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: { Authorization: authHeader } },
       });
       const { data: { user }, error: authErr } = await supabaseClient.auth.getUser(token);
@@ -57,16 +60,19 @@ serve(async (req) => {
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+      authenticatedUser = user;
       console.log(`[EDGE OCR SECURITY] Verified authenticated user: ${user.id}`);
     }
 
     // 3. PARSE REQUEST BODY WITH EXPLICIT LOGGING
     let imageBase64 = '';
     let mimeType = 'image/jpeg';
+    let shopId = '';
     try {
       const body = await req.json();
       imageBase64 = body.imageBase64 || '';
       mimeType = body.mimeType || 'image/jpeg';
+      shopId = body.shopId || '';
     } catch (bodyErr: any) {
       console.error('[EDGE OCR ERROR] Failed to parse request JSON payload:', bodyErr);
       return new Response(
@@ -90,6 +96,30 @@ serve(async (req) => {
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // 3b. OPTIONAL TENANT SHOP VERIFICATION
+    if (shopId && authenticatedUser && supabaseClient) {
+      const { data: shopRecord, error: shopErr } = await supabaseClient
+        .from('shops')
+        .select('id')
+        .eq('id', shopId)
+        .eq('owner_id', authenticatedUser.id)
+        .maybeSingle();
+
+      if (shopErr || !shopRecord) {
+        console.warn(`[EDGE OCR SECURITY] Shop ${shopId} does not belong to user ${authenticatedUser.id}`);
+        return new Response(
+          JSON.stringify({
+            is_valid_ledger: false,
+            status: 'unauthorized',
+            reason_if_invalid: 'Shop access denied. You do not have permission for this shop.',
+            error: 'Forbidden: Invalid shop ownership',
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      console.log(`[EDGE OCR SECURITY] Verified shop tenant ownership: ${shopId}`);
     }
 
     // 4. READ SECRET STRICTLY FROM ENVIRONMENT
@@ -127,7 +157,7 @@ If it is a selfie, face, landscape, blank paper, unrelated object, animal, vehic
 
 Step 2: If valid:
 - Extract the customer name written on the entry. If unreadable, return "". NEVER invent names.
-- Extract the numerical amount. Carefully interpret Bengali numerals (০, ১, ২, ৩, ৪, ৫, ৬, ৭, ৮, ৯), Hindi numerals (०, १, २, ३, ४, ५, ६, ७, ८, ९), or English digits. If ambiguous, set amount to 0 and status to "uncertain".
+- Extract the numerical amount. Carefully interpret Bengali numerals (০, ১, ২, ৩, ৪, ৫, ৬, ৭, ৮, ৯), Hindi numerals (०, १, २, ३, ४, ५, ६, ৭, ৮, ९), or English digits. If ambiguous, set amount to 0 and status to "uncertain".
 - Determine transaction type: "credit_given" if credit/due/baki/দেনা/বাকি/উধার/खाता, "payment_received" if payment/received/cash/জমা/পরিশোধ/নগদ/जमा/भुगतान, or "unknown".
 - Provide confidence (0.0 to 1.0).
 - If multiple entries exist, extract the primary/latest line entry.
@@ -145,35 +175,69 @@ Return STRICT JSON matching this schema:
   "raw_text": string
 }`;
 
-    // 6. EXECUTE GENERATE CONTENT
+    // 6. EXECUTE GENERATE CONTENT WITH BOUNDED RETRY & EXPONENTIAL BACKOFF
     let responseText = '';
-    try {
-      const response = await ai.models.generateContent({
-        model: activeModelIdentifier,
-        contents: [
-          strictExtractionPrompt,
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: cleanBase64,
-            },
-          },
-        ],
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+    let lastGenErr: any = null;
+    const maxAttempts = 3;
 
-      responseText = response.text || '';
-      console.log(`[EDGE OCR SUCCESS] Executed model ${activeModelIdentifier} via @google/genai.`);
-    } catch (genErr: any) {
-      console.error(`[EDGE OCR ERROR] Google Gen AI API Error on model ${activeModelIdentifier}:`, genErr);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model: activeModelIdentifier,
+          contents: [
+            strictExtractionPrompt,
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: cleanBase64,
+              },
+            },
+          ],
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
+
+        responseText = response.text || '';
+        console.log(`[EDGE OCR SUCCESS] Executed model ${activeModelIdentifier} on attempt ${attempt}.`);
+        lastGenErr = null;
+        break;
+      } catch (genErr: any) {
+        lastGenErr = genErr;
+        const errMsg = genErr.message || String(genErr);
+        console.warn(`[EDGE OCR] Attempt ${attempt}/${maxAttempts} failed with model ${activeModelIdentifier}:`, errMsg);
+
+        const isRetryable =
+          errMsg.includes('503') ||
+          errMsg.includes('UNAVAILABLE') ||
+          errMsg.includes('429') ||
+          errMsg.includes('RESOURCE_EXHAUSTED') ||
+          errMsg.includes('500') ||
+          errMsg.includes('502') ||
+          errMsg.includes('504') ||
+          errMsg.includes('fetch failed') ||
+          errMsg.includes('overloaded');
+
+        if (!isRetryable || attempt >= maxAttempts) {
+          break;
+        }
+
+        const baseDelay = 800 * Math.pow(2, attempt - 1);
+        const jitter = Math.floor(Math.random() * 300);
+        const delayMs = baseDelay + jitter;
+        console.log(`[EDGE OCR] Waiting ${delayMs}ms before retry attempt ${attempt + 1}...`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+
+    if (lastGenErr) {
+      console.error(`[EDGE OCR ERROR] Google Gen AI API Error on model ${activeModelIdentifier} after attempts:`, lastGenErr);
       return new Response(
         JSON.stringify({
           is_valid_ledger: false,
           status: 'unreadable',
-          reason_if_invalid: `Google Gen AI Error: ${genErr.message || String(genErr)}`,
-          error: genErr.message || String(genErr),
+          reason_if_invalid: `Google Gen AI Error: ${lastGenErr.message || String(lastGenErr)}`,
+          error: lastGenErr.message || String(lastGenErr),
           model_identifier: activeModelIdentifier,
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
