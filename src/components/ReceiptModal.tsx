@@ -63,6 +63,15 @@ export const ReceiptModal: React.FC<Props> = ({
   const [isLabOpen, setIsLabOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
 
+  // Development / Debug Gate for Experimental WhatsApp Lab
+  // Exposes lab only in local development (Vite dev) or when ?debug_wa=true or localStorage flag is explicitly set
+  const isDebugMode =
+    Boolean(import.meta.env?.DEV) ||
+    (typeof window !== 'undefined' &&
+      (window.location?.search?.includes('debug_wa=true') ||
+        localStorage?.getItem('smart_khata_debug_wa') === 'true' ||
+        localStorage?.getItem('smart_khata_dev_mode') === 'true'));
+
   const isCredit = transaction.type === 'credit_given';
   const isVoid = transaction.type === 'void_correction' || transaction.is_voided;
   const fmt = (amt: number) => formatShopCurrency(amt, shop?.country, shop?.currency_code);
@@ -729,15 +738,17 @@ export const ReceiptModal: React.FC<Props> = ({
             <span>Send on WhatsApp</span>
           </button>
 
-          {/* Experimental Native Lab (Isolated POC - Does NOT affect primary button above) */}
-          <button
-            type="button"
-            onClick={() => setIsLabOpen(true)}
-            className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-200 flex items-center justify-center space-x-1.5 transition-colors"
-          >
-            <FlaskConical className="w-3.5 h-3.5 text-indigo-600" />
-            <span>🔬 WhatsApp Native Lab (Experimental POC)</span>
-          </button>
+          {/* Experimental Native Lab (Development/Debug Gate - Hidden in Production UI) */}
+          {isDebugMode && (
+            <button
+              type="button"
+              onClick={() => setIsLabOpen(true)}
+              className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-200 flex items-center justify-center space-x-1.5 transition-colors"
+            >
+              <FlaskConical className="w-3.5 h-3.5 text-indigo-600" />
+              <span>🔬 WhatsApp Native Lab (Experimental POC)</span>
+            </button>
+          )}
 
           {/* Multi Control Action Grid */}
           <div className="grid grid-cols-4 gap-1.5 pt-1">
@@ -829,18 +840,20 @@ export const ReceiptModal: React.FC<Props> = ({
         </div>
       )}
 
-      {/* WhatsApp Native Intent Lab Modal (Isolated POC) */}
-      <WhatsAppExperimentLabModal
-        isOpen={isLabOpen}
-        onClose={() => setIsLabOpen(false)}
-        activeCustomer={activeCustomer}
-        shop={shop}
-        language={language}
-        transaction={transaction}
-        details={details}
-        receiptText={receiptText}
-        generateReceiptImage={generateCanvasFile}
-      />
+      {/* WhatsApp Native Intent Lab Modal (Development / Debug Only) */}
+      {isDebugMode && (
+        <WhatsAppExperimentLabModal
+          isOpen={isLabOpen}
+          onClose={() => setIsLabOpen(false)}
+          activeCustomer={activeCustomer}
+          shop={shop}
+          language={language}
+          transaction={transaction}
+          details={details}
+          receiptText={receiptText}
+          generateReceiptImage={generateCanvasFile}
+        />
+      )}
     </div>
   );
 };
