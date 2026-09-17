@@ -4,6 +4,7 @@ import { formatShopCurrency } from './countryPricing';
 import { MetaCloudApiService } from './metaCloudApi';
 import { EMIInstallmentDB, EMIAccountDB } from './emiService';
 import { replaceMessageVariables } from './communicationEngine';
+import { unpackReceiptNote } from './receiptUtils';
 
 export type WhatsAppMessageType =
   | 'RECEIPT'
@@ -157,74 +158,329 @@ export function buildWhatsAppMessage(options: WhatsAppMessageOptions): string {
   switch (type) {
     case 'RECEIPT': {
       const tx = options.transaction;
-      const details = options.receiptDetails;
-      const receiptNo = details?.receipt_number || (tx ? `INV-${tx.id.slice(-6).toUpperCase()}` : `INV-${Date.now().toString().slice(-6)}`);
-      const txAmt = tx ? Number(tx.amount) : (details?.paid_amount || details?.subtotal || 0);
-      const isCredit = tx?.type === 'credit_given' || details?.mode === 'credit_sale';
-      const typeLabel = isCredit
-        ? (language === 'bn' ? 'বাকি বিক্রয়' : language === 'hi' ? 'उधार बिक्री' : 'Due Sale')
-        : (language === 'bn' ? 'নগদ বিক্রয়' : language === 'hi' ? 'नकद बिक्री' : 'Cash Sale');
+      const details = options.receiptDetails !== undefined
+        ? options.receiptDetails
+        : (tx ? unpackReceiptNote(tx).details : null);
 
+      const receiptNo = details?.receipt_number || (tx ? `INV-${tx.id.replace(/\D/g, '').slice(-6) || tx.id.slice(-6).toUpperCase()}` : `INV-${Date.now().toString().slice(-6)}`);
+      
+      const txDate = tx?.created_at ? new Date(tx.created_at) : new Date();
+      const dateStr = txDate.toLocaleDateString(language === 'bn' ? 'bn-BD' : language === 'hi' ? 'hi-IN' : 'en-US', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+      const timeStr = txDate.toLocaleTimeString(language === 'bn' ? 'bn-BD' : language === 'hi' ? 'hi-IN' : 'en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      const mode = details?.mode || (tx?.type === 'credit_given' ? 'credit_sale' : 'due_payment');
+      const isPurePayment = mode === 'due_payment';
+      const txAmt = tx ? Number(tx.amount) : (details?.paid_amount || details?.subtotal || 0);
+
+      // Customer Details
+      const customerAddressStr = (details?.customer_address || customer.address || customer.state || '').trim();
+      const customerGstinStr = (details?.customer_gstin || customer.gstin || '').trim();
+
+      // Items
+      const items = details?.items && details.items.length > 0 ? details.items : [];
+
+      // Subtotal & Discount
+      const subtotal = details?.subtotal !== undefined ? details.subtotal : (items.length > 0 ? items.reduce((s, i) => s + i.total, 0) : txAmt);
+      const discountAmt = details?.discount_amount || 0;
+      const discountLabel = details?.discount_type === 'percentage' && details?.discount_value ? `${details.discount_value}%` : (language === 'bn' ? 'নির্দিষ্ট' : language === 'hi' ? 'निश्चित' : 'Fixed');
+
+      // GST Details
+      const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && tx?.tax_amount && tx.tax_amount > 0));
+      const gstRate = tx?.gst_rate || shop.default_gst_rate || 18;
+      const taxableBase = details?.taxable_amount !== undefined ? details.taxable_amount : Math.max(0, subtotal - discountAmt);
+      const cgstAmt = tx?.cgst_amount || 0;
+      const sgstAmt = tx?.sgst_amount || 0;
+      const igstAmt = tx?.igst_amount || 0;
+      const gstPriceMode = details?.gst_price_mode || tx?.gst_price_mode || 'inclusive';
+
+      // Balances
       const prevBal = details?.previous_balance !== undefined ? details.previous_balance : (customer.balance || 0);
-      const currentBal = customer.balance !== undefined ? customer.balance : prevBal;
+      let currentBal = 0;
+      if (mode === 'cash_sale') {
+        currentBal = Math.max(0, prevBal);
+      } else if (mode === 'credit_sale') {
+        const newDue = details?.new_due_amount !== undefined ? details.new_due_amount : txAmt;
+        currentBal = prevBal + newDue;
+      } else if (mode === 'emi_plan') {
+        const financed = details?.emi_details?.financed_amount || details?.new_due_amount || txAmt;
+        currentBal = prevBal + financed;
+      } else {
+        currentBal = Math.max(0, prevBal - txAmt);
+      }
+
+      // EMI details
+      const emi = details?.emi_details;
+
+      // Payment method
+      const paymentMethod = details?.payment_method;
+
+      // Unpack note
+      const noteText = (tx ? unpackReceiptNote(tx).noteText : (details?.notes || '')).trim();
+
+      const fmt = (amt: number) => formatShopCurrency(amt, shop.country, shop.currency_code);
 
       if (language === 'bn') {
-        return (
-          `🧾 *${shopName.toUpperCase()}*\n` +
-          `${shopAddress ? `ঠিকানা: ${shopAddress}\n` : ''}` +
-          `${ownerName ? `প্রোপ্রাইটার: ${ownerName}\n` : ''}` +
-          `${shopPhone ? `মোবাইল: ${shopPhone}\n` : ''}` +
-          `----------------------------\n` +
-          `📄 *রসিদ নং:* ${receiptNo}\n` +
-          `📅 *তারিখ:* ${todayStr}\n` +
-          `----------------------------\n` +
-          `👤 *কাস্টমার:* ${custName}\n` +
-          `📱 *মোবাইল:* ${customer.phone_number || 'N/A'}\n` +
-          `----------------------------\n` +
-          `💰 *${typeLabel}:* ${formatShopCurrency(txAmt, shop.country, shop.currency_code)}\n` +
-          `${prevBal > 0 ? `🔴 *পূর্বের বাকি:* ${formatShopCurrency(prevBal, shop.country, shop.currency_code)}\n` : ''}` +
-          `🔴 *বর্তমান মোট বাকি:* ${formatShopCurrency(currentBal, shop.country, shop.currency_code)}\n` +
-          `----------------------------\n` +
-          `আমাদের সাথে কেনাকাটা করার জন্য ধন্যবাদ! — ${shopName}`
-        );
+        let msg = `🧾 *${shopName.toUpperCase()}*\n`;
+        if (shopAddress) msg += `📍 দোকানের ঠিকানা: ${shopAddress}\n`;
+        if (ownerName) msg += `👤 প্রোপ্রাইটার: ${ownerName}\n`;
+        if (shopPhone) msg += `📞 মোবাইল: ${shopPhone}\n`;
+        if (shop.gst_enabled && shop.gst_number) msg += `🏛️ GSTIN: ${shop.gst_number}\n`;
+        msg += `----------------------------\n`;
+        msg += `📄 *রসিদ নং:* ${receiptNo}\n`;
+        msg += `📅 *তারিখ ও সময়:* ${dateStr}, ${timeStr}\n`;
+        if (paymentMethod) msg += `💳 *পরিশোধের মাধ্যম:* ${paymentMethod}\n`;
+        msg += `----------------------------\n`;
+        msg += `👤 *কাস্টমার:* ${custName}\n`;
+        msg += `📱 *মোবাইল:* ${customer.phone_number || 'N/A'}\n`;
+        if (customerAddressStr) msg += `📍 *কাস্টমারের ঠিকানা:* ${customerAddressStr}\n`;
+        if (customerGstinStr) msg += `🏛️ *GSTIN:* ${customerGstinStr}\n`;
+        msg += `----------------------------\n`;
+
+        if (!isPurePayment && items.length > 0) {
+          msg += `🛍️ *ক্রয়কৃত পণ্যের বিবরণ:*\n`;
+          items.forEach((it) => {
+            msg += `• ${it.name}\n  ${it.quantity} × ${fmt(it.unit_price)} = ${fmt(it.total)}\n`;
+          });
+          msg += `----------------------------\n`;
+        }
+
+        if (!isPurePayment) {
+          msg += `মোট মূল্য: ${fmt(subtotal)}\n`;
+          if (discountAmt > 0) {
+            msg += `ছাড় (${discountLabel}): -${fmt(discountAmt)}\n`;
+          }
+          if (hasGst) {
+            msg += `করযোগ্য মূল্য: ${fmt(taxableBase)}\n`;
+            if (cgstAmt > 0) msg += `CGST (${gstRate / 2}%): +${fmt(cgstAmt)}\n`;
+            if (sgstAmt > 0) msg += `SGST (${gstRate / 2}%): +${fmt(sgstAmt)}\n`;
+            if (igstAmt > 0) msg += `IGST (${gstRate}%): +${fmt(igstAmt)}\n`;
+          }
+          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && tx?.tax_amount ? (taxableBase + tx.tax_amount) : Math.max(0, subtotal - discountAmt);
+          msg += `💰 *সর্বমোট মূল্য:* ${fmt(grandTotalAmt)}\n`;
+          msg += `----------------------------\n`;
+        }
+
+        if (mode === 'emi_plan' && emi) {
+          msg += `🏦 *কিস্তি পরিশোধ পরিকল্পনা (EMI):*\n`;
+          msg += `• মোট বিক্রয়: ${fmt(emi.total_amount)}\n`;
+          msg += `• ডাউন পেমেন্ট (জমা): ${fmt(emi.down_payment)}\n`;
+          msg += `• বাকি কিস্তি ঋণ: ${fmt(emi.financed_amount)}\n`;
+          msg += `• প্রতি মাসে কিস্তি: ${fmt(emi.installment_amount)} × ${emi.installment_count} মাস\n`;
+          msg += `• প্রথম কিস্তির তারিখ: ${emi.start_date}\n`;
+          msg += `----------------------------\n`;
+        }
+
+        if (mode === 'cash_sale') {
+          msg += `💰 *পরিশোধ:* ${fmt(txAmt)} (✅ সম্পূর্ণ পরিশোধিত)\n`;
+          msg += `🔴 *অবশিষ্ট বাকি:* ${fmt(currentBal)}\n`;
+        } else if (mode === 'credit_sale') {
+          if (details?.paid_amount && details.paid_amount > 0) {
+            msg += `💵 *নগদ জমা:* ${fmt(details.paid_amount)}\n`;
+          }
+          msg += `🧾 *নতুন বাকি:* ${fmt(details?.new_due_amount || txAmt)}\n`;
+          if (prevBal > 0) {
+            msg += `🔴 *পূর্বের বাকি:* ${fmt(prevBal)}\n`;
+          }
+          msg += `🔴 *বর্তমান মোট বাকি:* ${fmt(currentBal)}\n`;
+        } else if (mode === 'emi_plan') {
+          if (emi?.down_payment || details?.paid_amount) {
+            msg += `💵 *ডাউন পেমেন্ট জমা:* ${fmt(emi?.down_payment || details?.paid_amount || 0)}\n`;
+          }
+          msg += `🧾 *বাকি কিস্তি ঋণ:* ${fmt(emi?.financed_amount || txAmt)}\n`;
+          if (prevBal > 0) {
+            msg += `🔴 *পূর্বের বাকি:* ${fmt(prevBal)}\n`;
+          }
+          msg += `🔴 *বর্তমান মোট বাকি:* ${fmt(currentBal)}\n`;
+        } else {
+          if (prevBal > 0) {
+            msg += `🔴 *পূর্বের বাকি:* ${fmt(prevBal)}\n`;
+          }
+          msg += `💵 *জমা পেয়েছেন:* ${fmt(txAmt)}\n`;
+          msg += `🔴 *অবশিষ্ট বাকি:* ${fmt(currentBal)}\n`;
+        }
+
+        if (noteText) {
+          msg += `----------------------------\n📝 *নোট:* ${noteText}\n`;
+        }
+        msg += `----------------------------\nআমাদের সাথে কেনাকাটা করার জন্য ধন্যবাদ! — ${shopName}`;
+        return msg;
       } else if (language === 'hi') {
-        return (
-          `🧾 *${shopName.toUpperCase()}*\n` +
-          `${shopAddress ? `पता: ${shopAddress}\n` : ''}` +
-          `${ownerName ? `मालिक: ${ownerName}\n` : ''}` +
-          `${shopPhone ? `फोन: ${shopPhone}\n` : ''}` +
-          `----------------------------\n` +
-          `📄 *रसीद सं.:* ${receiptNo}\n` +
-          `📅 *तिथि:* ${todayStr}\n` +
-          `----------------------------\n` +
-          `👤 *ग्राहक:* ${custName}\n` +
-          `📱 *मोबाइल:* ${customer.phone_number || 'N/A'}\n` +
-          `----------------------------\n` +
-          `💰 *${typeLabel}:* ${formatShopCurrency(txAmt, shop.country, shop.currency_code)}\n` +
-          `${prevBal > 0 ? `🔴 *पिछला बकाया:* ${formatShopCurrency(prevBal, shop.country, shop.currency_code)}\n` : ''}` +
-          `🔴 *वर्तमान कुल बकाया:* ${formatShopCurrency(currentBal, shop.country, shop.currency_code)}\n` +
-          `----------------------------\n` +
-          `हमारे साथ व्यापार करने के लिए धन्यवाद! — ${shopName}`
-        );
+        let msg = `🧾 *${shopName.toUpperCase()}*\n`;
+        if (shopAddress) msg += `📍 दुकान का पता: ${shopAddress}\n`;
+        if (ownerName) msg += `👤 मालिक: ${ownerName}\n`;
+        if (shopPhone) msg += `📞 फोन: ${shopPhone}\n`;
+        if (shop.gst_enabled && shop.gst_number) msg += `🏛️ GSTIN: ${shop.gst_number}\n`;
+        msg += `----------------------------\n`;
+        msg += `📄 *रसीद सं.:* ${receiptNo}\n`;
+        msg += `📅 *तिथि व समय:* ${dateStr}, ${timeStr}\n`;
+        if (paymentMethod) msg += `💳 *भुगतान विधि:* ${paymentMethod}\n`;
+        msg += `----------------------------\n`;
+        msg += `👤 *ग्राहक:* ${custName}\n`;
+        msg += `📱 *मोबाइल:* ${customer.phone_number || 'N/A'}\n`;
+        if (customerAddressStr) msg += `📍 *ग्राहक का पता:* ${customerAddressStr}\n`;
+        if (customerGstinStr) msg += `🏛️ *GSTIN:* ${customerGstinStr}\n`;
+        msg += `----------------------------\n`;
+
+        if (!isPurePayment && items.length > 0) {
+          msg += `🛍️ *खरीदे गए सामान:*\n`;
+          items.forEach((it) => {
+            msg += `• ${it.name}\n  ${it.quantity} × ${fmt(it.unit_price)} = ${fmt(it.total)}\n`;
+          });
+          msg += `----------------------------\n`;
+        }
+
+        if (!isPurePayment) {
+          msg += `उप-योग: ${fmt(subtotal)}\n`;
+          if (discountAmt > 0) {
+            msg += `छूट (${discountLabel}): -${fmt(discountAmt)}\n`;
+          }
+          if (hasGst) {
+            msg += `कर योग्य मूल्य: ${fmt(taxableBase)}\n`;
+            if (cgstAmt > 0) msg += `CGST (${gstRate / 2}%): +${fmt(cgstAmt)}\n`;
+            if (sgstAmt > 0) msg += `SGST (${gstRate / 2}%): +${fmt(sgstAmt)}\n`;
+            if (igstAmt > 0) msg += `IGST (${gstRate}%): +${fmt(igstAmt)}\n`;
+          }
+          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && tx?.tax_amount ? (taxableBase + tx.tax_amount) : Math.max(0, subtotal - discountAmt);
+          msg += `💰 *कुल योग:* ${fmt(grandTotalAmt)}\n`;
+          msg += `----------------------------\n`;
+        }
+
+        if (mode === 'emi_plan' && emi) {
+          msg += `🏦 *किस्त भुगतान योजना (EMI):*\n`;
+          msg += `• कुल बिक्री: ${fmt(emi.total_amount)}\n`;
+          msg += `• डाउन पेमेंट (जमा): ${fmt(emi.down_payment)}\n`;
+          msg += `• किस्त ऋण बकाया: ${fmt(emi.financed_amount)}\n`;
+          msg += `• मासिक किस्त: ${fmt(emi.installment_amount)} × ${emi.installment_count} महीने\n`;
+          msg += `• पहली किस्त तिथि: ${emi.start_date}\n`;
+          msg += `----------------------------\n`;
+        }
+
+        if (mode === 'cash_sale') {
+          msg += `💰 *भुगतान:* ${fmt(txAmt)} (✅ पूर्ण भुगतान)\n`;
+          msg += `🔴 *शेष बकाया:* ${fmt(currentBal)}\n`;
+        } else if (mode === 'credit_sale') {
+          if (details?.paid_amount && details.paid_amount > 0) {
+            msg += `💵 *जमा राशि:* ${fmt(details.paid_amount)}\n`;
+          }
+          msg += `🧾 *नया बकाया:* ${fmt(details?.new_due_amount || txAmt)}\n`;
+          if (prevBal > 0) {
+            msg += `🔴 *पिछला बकाया:* ${fmt(prevBal)}\n`;
+          }
+          msg += `🔴 *वर्तमान कुल बकाया:* ${fmt(currentBal)}\n`;
+        } else if (mode === 'emi_plan') {
+          if (emi?.down_payment || details?.paid_amount) {
+            msg += `💵 *डाउन पेमेंट जमा:* ${fmt(emi?.down_payment || details?.paid_amount || 0)}\n`;
+          }
+          msg += `🧾 *किस्त ऋण बकाया:* ${fmt(emi?.financed_amount || txAmt)}\n`;
+          if (prevBal > 0) {
+            msg += `🔴 *पिछला बकाया:* ${fmt(prevBal)}\n`;
+          }
+          msg += `🔴 *वर्तमान कुल बकाया:* ${fmt(currentBal)}\n`;
+        } else {
+          if (prevBal > 0) {
+            msg += `🔴 *पिछला बकाया:* ${fmt(prevBal)}\n`;
+          }
+          msg += `💵 *प्राप्त भुगतान:* ${fmt(txAmt)}\n`;
+          msg += `🔴 *शेष बकाया:* ${fmt(currentBal)}\n`;
+        }
+
+        if (noteText) {
+          msg += `----------------------------\n📝 *नोट:* ${noteText}\n`;
+        }
+        msg += `----------------------------\nहमारे साथ व्यापार करने के लिए धन्यवाद! — ${shopName}`;
+        return msg;
       } else {
-        return (
-          `🧾 *${shopName.toUpperCase()}*\n` +
-          `${shopAddress ? `Address: ${shopAddress}\n` : ''}` +
-          `${ownerName ? `Owner: ${ownerName}\n` : ''}` +
-          `${shopPhone ? `Phone: ${shopPhone}\n` : ''}` +
-          `----------------------------\n` +
-          `📄 *RECEIPT NO:* ${receiptNo}\n` +
-          `📅 *Date:* ${todayStr}\n` +
-          `----------------------------\n` +
-          `👤 *CUSTOMER:* ${custName}\n` +
-          `📱 *Mobile:* ${customer.phone_number || 'N/A'}\n` +
-          `----------------------------\n` +
-          `💰 *${typeLabel.toUpperCase()}:* ${formatShopCurrency(txAmt, shop.country, shop.currency_code)}\n` +
-          `${prevBal > 0 ? `🔴 *Previous Due:* ${formatShopCurrency(prevBal, shop.country, shop.currency_code)}\n` : ''}` +
-          `🔴 *Total Outstanding Due:* ${formatShopCurrency(currentBal, shop.country, shop.currency_code)}\n` +
-          `----------------------------\n` +
-          `Thank you for your business! — ${shopName}`
-        );
+        let msg = `🧾 *${shopName.toUpperCase()}*\n`;
+        if (shopAddress) msg += `📍 Shop Address: ${shopAddress}\n`;
+        if (ownerName) msg += `👤 Owner: ${ownerName}\n`;
+        if (shopPhone) msg += `📞 Phone: ${shopPhone}\n`;
+        if (shop.gst_enabled && shop.gst_number) msg += `🏛️ GSTIN: ${shop.gst_number}\n`;
+        msg += `----------------------------\n`;
+        msg += `📄 *RECEIPT NO:* ${receiptNo}\n`;
+        msg += `📅 *Date & Time:* ${dateStr}, ${timeStr}\n`;
+        if (paymentMethod) msg += `💳 *Payment Method:* ${paymentMethod}\n`;
+        msg += `----------------------------\n`;
+        msg += `👤 *CUSTOMER:* ${custName}\n`;
+        msg += `📱 *Mobile:* ${customer.phone_number || 'N/A'}\n`;
+        if (customerAddressStr) msg += `📍 *Customer Address:* ${customerAddressStr}\n`;
+        if (customerGstinStr) msg += `🏛️ *GSTIN:* ${customerGstinStr}\n`;
+        msg += `----------------------------\n`;
+
+        if (!isPurePayment && items.length > 0) {
+          msg += `🛍️ *PURCHASED ITEMS:*\n`;
+          items.forEach((it) => {
+            msg += `• ${it.name}\n  ${it.quantity} × ${fmt(it.unit_price)} = ${fmt(it.total)}\n`;
+          });
+          msg += `----------------------------\n`;
+        }
+
+        if (!isPurePayment) {
+          msg += `Subtotal: ${fmt(subtotal)}\n`;
+          if (discountAmt > 0) {
+            msg += `Discount (${discountLabel}): -${fmt(discountAmt)}\n`;
+          }
+          if (hasGst) {
+            msg += `Taxable Base: ${fmt(taxableBase)}\n`;
+            if (cgstAmt > 0) msg += `CGST (${gstRate / 2}%): +${fmt(cgstAmt)}\n`;
+            if (sgstAmt > 0) msg += `SGST (${gstRate / 2}%): +${fmt(sgstAmt)}\n`;
+            if (igstAmt > 0) msg += `IGST (${gstRate}%): +${fmt(igstAmt)}\n`;
+          }
+          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && tx?.tax_amount ? (taxableBase + tx.tax_amount) : Math.max(0, subtotal - discountAmt);
+          msg += `💰 *GRAND TOTAL:* ${fmt(grandTotalAmt)}\n`;
+          msg += `----------------------------\n`;
+        }
+
+        if (mode === 'emi_plan' && emi) {
+          msg += `🏦 *EMI PAYMENT SCHEDULE:*\n`;
+          msg += `• Total Amount: ${fmt(emi.total_amount)}\n`;
+          msg += `• Down Payment: ${fmt(emi.down_payment)}\n`;
+          msg += `• Financed Amount: ${fmt(emi.financed_amount)}\n`;
+          msg += `• Monthly EMI: ${fmt(emi.installment_amount)} × ${emi.installment_count} Months\n`;
+          msg += `• First EMI Due Date: ${emi.start_date}\n`;
+          msg += `----------------------------\n`;
+        }
+
+        if (mode === 'cash_sale') {
+          msg += `💰 *Total Paid:* ${fmt(txAmt)} (✅ PAID IN FULL)\n`;
+          msg += `🔴 *Remaining Due:* ${fmt(currentBal)}\n`;
+        } else if (mode === 'credit_sale') {
+          if (details?.paid_amount && details.paid_amount > 0) {
+            msg += `💵 *Paid Now:* ${fmt(details.paid_amount)}\n`;
+          }
+          msg += `🧾 *New Purchase Due:* ${fmt(details?.new_due_amount || txAmt)}\n`;
+          if (prevBal > 0) {
+            msg += `🔴 *Previous Due:* ${fmt(prevBal)}\n`;
+          }
+          msg += `🔴 *Total Outstanding Due:* ${fmt(currentBal)}\n`;
+        } else if (mode === 'emi_plan') {
+          if (emi?.down_payment || details?.paid_amount) {
+            msg += `💵 *Down Payment Paid:* ${fmt(emi?.down_payment || details?.paid_amount || 0)}\n`;
+          }
+          msg += `🧾 *Financed on EMI:* ${fmt(emi?.financed_amount || txAmt)}\n`;
+          if (prevBal > 0) {
+            msg += `🔴 *Previous Due:* ${fmt(prevBal)}\n`;
+          }
+          msg += `🔴 *Total Outstanding Due:* ${fmt(currentBal)}\n`;
+        } else {
+          if (prevBal > 0) {
+            msg += `🔴 *Previous Due:* ${fmt(prevBal)}\n`;
+          }
+          msg += `💵 *Payment Received:* ${fmt(txAmt)}\n`;
+          msg += `🔴 *Remaining Due:* ${fmt(currentBal)}\n`;
+        }
+
+        if (noteText) {
+          msg += `----------------------------\n📝 *Note:* ${noteText}\n`;
+        }
+        msg += `----------------------------\nThank you for your business! — ${shopName}`;
+        return msg;
       }
     }
 

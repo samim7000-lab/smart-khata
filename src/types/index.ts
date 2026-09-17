@@ -78,6 +78,15 @@ export interface ReceiptDetailsPayload {
   customer_gstin?: string;
   receipt_number?: string;
   notes?: string;
+  emi_details?: {
+    product_name: string;
+    total_amount: number;
+    down_payment: number;
+    financed_amount: number;
+    installment_count: number;
+    installment_amount: number;
+    start_date: string;
+  };
 }
 
 export interface Transaction {

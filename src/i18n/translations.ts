@@ -159,6 +159,16 @@ export type TranslationKey =
   | 'receipt_address'
   | 'receipt_customer'
   | 'receipt_thank_you'
+  | 'customer_address'
+  | 'shop_address_label'
+  | 'purchased_items'
+  | 'emi_schedule_title'
+  | 'down_payment_label'
+  | 'financed_amount_label'
+  | 'monthly_installment_label'
+  | 'total_installments'
+  | 'first_due_date'
+  | 'step_title_5_emi'
   | 'scan_ledger_page'
   | 'scan_ledger_title'
   | 'scan_ledger_subtitle'
@@ -401,6 +411,16 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     receipt_address: 'Address',
     receipt_customer: 'Customer',
     receipt_thank_you: 'Thank you!',
+    customer_address: 'Customer Address',
+    shop_address_label: 'Shop Address',
+    purchased_items: 'Purchased Items',
+    emi_schedule_title: 'EMI Payment Schedule',
+    down_payment_label: 'Down Payment',
+    financed_amount_label: 'Financed Amount',
+    monthly_installment_label: 'Monthly EMI',
+    total_installments: 'Total EMIs',
+    first_due_date: 'First EMI Due Date',
+    step_title_5_emi: 'EMI Schedule & Down Payment',
     scan_ledger_page: 'Scan Ledger Page',
     scan_ledger_title: 'AI Handwriting Scanner',
     scan_ledger_subtitle: 'Upload or take a photo of handwritten notebook entries',
@@ -642,6 +662,16 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     receipt_address: 'ঠিকানা',
     receipt_customer: 'কাস্টমার',
     receipt_thank_you: 'ধন্যবাদ!',
+    customer_address: 'কাস্টমারের ঠিকানা',
+    shop_address_label: 'দোকানের ঠিকানা',
+    purchased_items: 'ক্রয়কৃত পণ্যের বিবরণ',
+    emi_schedule_title: 'কিস্তি পরিশোধ পরিকল্পনা (EMI)',
+    down_payment_label: 'ডাউন পেমেন্ট (জমা)',
+    financed_amount_label: 'বাকি কিস্তি ঋণ',
+    monthly_installment_label: 'প্রতি মাসে কিস্তি',
+    total_installments: 'মোট কিস্তির সংখ্যা',
+    first_due_date: 'প্রথম কিস্তির তারিখ',
+    step_title_5_emi: 'কিস্তি পরিকল্পনা ও ডাউন পেমেন্ট',
     scan_ledger_page: 'লেজার খাতা স্ক্যান করুন',
     scan_ledger_title: 'এআই হ্যান্ডরাইটিং স্ক্যানার',
     scan_ledger_subtitle: 'হাতে লেখা খাতার পাতার ছবি আপলোড বা টেক করুন',
@@ -883,6 +913,16 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     receipt_address: 'पता',
     receipt_customer: 'ग्राहक',
     receipt_thank_you: 'धन्यवाद!',
+    customer_address: 'ग्राहक का पता',
+    shop_address_label: 'दुकान का पता',
+    purchased_items: 'खरीदे गए सामान',
+    emi_schedule_title: 'किस्त भुगतान योजना (EMI)',
+    down_payment_label: 'डाउन पेमेंट (जमा)',
+    financed_amount_label: 'किस्त ऋण राशि',
+    monthly_installment_label: 'मासिक किस्त',
+    total_installments: 'कुल किस्तें',
+    first_due_date: 'पहली किस्त की तारीख',
+    step_title_5_emi: 'किस्त योजना और डाउन पेमेंट',
     scan_ledger_page: 'खाता पन्ना स्कैन करें',
     scan_ledger_title: 'एआई हैंडराइटिंग स्कैनर',
     scan_ledger_subtitle: 'हाथ से लिखे खाता पन्नों की फोटो अपलोड करें',

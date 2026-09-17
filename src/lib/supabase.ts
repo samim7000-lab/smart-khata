@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { Customer, Shop, Transaction } from '../types';
 
-const cleanUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-const cleanKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+const cleanUrl = (import.meta.env?.VITE_SUPABASE_URL || '').trim();
+const cleanKey = (import.meta.env?.VITE_SUPABASE_ANON_KEY || '').trim();
 
 export const isSupabaseConfigured = Boolean(
   cleanUrl &&
@@ -14,7 +14,7 @@ export const isSupabaseConfigured = Boolean(
   cleanKey.length > 20
 );
 
-export const authMode = import.meta.env.VITE_AUTH_MODE || (import.meta.env.VITE_DEV_MODE === 'false' ? 'production' : 'development');
+export const authMode = import.meta.env?.VITE_AUTH_MODE || (import.meta.env?.VITE_DEV_MODE === 'false' ? 'production' : 'development');
 export const isDevAuth = authMode === 'development';
 export const isDevMode = isDevAuth;
 

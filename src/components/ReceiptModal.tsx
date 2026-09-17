@@ -25,7 +25,7 @@ import { validatePhoneNumber } from '../lib/phoneValidation';
 import { getCountryByCode } from '../data/countries';
 import { printTransactionReceiptPDF } from '../lib/pdfGenerator';
 import { getWhatsAppUrl } from '../lib/whatsappUtils';
-import { dispatchWhatsApp, validateCustomerPhone } from '../lib/whatsappService';
+import { dispatchWhatsApp, validateCustomerPhone, buildWhatsAppMessage } from '../lib/whatsappService';
 import { formatShopCurrency } from '../lib/countryPricing';
 import { unpackReceiptNote, calculatePreviousBalance } from '../lib/receiptUtils';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -81,9 +81,11 @@ export const ReceiptModal: React.FC<Props> = ({
   // Dynamic Type Labels adhering strictly to Requirement #13 (Proper English Terminology)
   let typeLabel = '';
   if (language === 'bn') {
-    typeLabel = isVoid ? 'ভয়েড / সংশোধন' : mode === 'cash_sale' ? 'নগদ বিক্রি' : mode === 'credit_sale' ? 'বাকি বিক্রি' : 'বাকি আদায় / জমা';
+    typeLabel = isVoid ? 'ভয়েড / সংশোধন' : mode === 'cash_sale' ? 'নগদ বিক্রি' : mode === 'credit_sale' ? 'বাকি বিক্রি' : mode === 'emi_plan' ? 'কিস্তি বিক্রয় (EMI)' : 'বাকি আদায় / জমা';
+  } else if (language === 'hi') {
+    typeLabel = isVoid ? 'रद्द / संशोधन' : mode === 'cash_sale' ? 'नकद बिक्री' : mode === 'credit_sale' ? 'उधार बिक्री' : mode === 'emi_plan' ? 'किस्त बिक्री (EMI)' : 'भुगतान पावती';
   } else {
-    typeLabel = isVoid ? 'Void / Correction' : mode === 'cash_sale' ? 'Cash Sale (Paid)' : mode === 'credit_sale' ? 'Credit Sale (Due)' : 'Payment Received';
+    typeLabel = isVoid ? 'Void / Correction' : mode === 'cash_sale' ? 'Cash Sale (Paid)' : mode === 'credit_sale' ? 'Credit Sale (Due)' : mode === 'emi_plan' ? 'EMI Sale / Plan' : 'Payment Received';
   }
 
   // Mathematical balance calculations (CRITICAL BAKI FIX: Previous Due before this transaction)
@@ -96,19 +98,22 @@ export const ReceiptModal: React.FC<Props> = ({
   } else if (mode === 'credit_sale') {
     const newDue = details?.new_due_amount !== undefined ? details.new_due_amount : txAmt;
     currentBalance = prevBalance + newDue;
+  } else if (mode === 'emi_plan') {
+    const financed = details?.emi_details?.financed_amount || details?.new_due_amount || txAmt;
+    currentBalance = prevBalance + financed;
   } else {
     currentBalance = Math.max(0, prevBalance - txAmt);
   }
 
   const isFullyPaid = currentBalance <= 0;
 
-  // Item List (Only shown if mode is cash_sale or credit_sale and items exist)
+  // Item List (Only shown if mode is cash_sale or credit_sale or emi_plan and items exist)
   const isPurePayment = mode === 'due_payment';
   const hasItems = !isPurePayment && details?.items && details.items.length > 0;
   const lineItems = hasItems ? details.items! : (
     !isPurePayment ? [{
       id: 'default-item',
-      name: noteText || 'General Item Purchase',
+      name: noteText || (details?.emi_details?.product_name ? `EMI: ${details.emi_details.product_name}` : 'General Item Purchase'),
       quantity: 1,
       unit_price: txAmt,
       total: txAmt,
@@ -131,23 +136,15 @@ export const ReceiptModal: React.FC<Props> = ({
   const customerAddressStr = (details?.customer_address || customer.address || customer.state || '').trim();
   const customerGstinStr = (details?.customer_gstin || customer.gstin || '').trim();
 
-  // Formatted Text Receipt for Copy & WhatsApp text fallback
-  const labelPrevDue = language === 'bn' ? 'পূর্বের বাকি' : 'Previous Due';
-  const labelCurrentDue = language === 'bn' ? 'বর্তমান মোট বাকি' : 'Total Outstanding Due';
-  const labelPaymentRecv = language === 'bn' ? 'জমা পেয়েছেন' : 'Payment Received';
-
-  const receiptText = `🧾 *${shop.shop_name.toUpperCase()}*
-${shopAddressStr ? `Address: ${shopAddressStr}\n` : ''}${shop.owner_name ? `Owner: ${shop.owner_name}\n` : ''}${shop.phone ? `Phone: ${shop.phone}\n` : ''}${shop.gst_enabled && shop.gst_number ? `GSTIN: ${shop.gst_number}\n` : ''}----------------------------
-📄 *RECEIPT NO:* ${receiptNumber}
-📅 *Date:* ${dateFormatted} ${timeFormatted}
-----------------------------
-👤 *CUSTOMER:* ${customer.display_label || customer.name}
-📱 *Mobile:* ${activeCustomer.phone_number || 'N/A'}
-${customerAddressStr ? `📍 *Address:* ${customerAddressStr}\n` : ''}${customerGstinStr ? `GSTIN: ${customerGstinStr}\n` : ''}----------------------------
-💰 *${typeLabel.toUpperCase()}:* ${fmt(txAmt)}
-${prevBalance > 0 || isCredit ? `🔴 *${labelPrevDue}:* ${fmt(prevBalance)}\n` : ''}🔴 *${labelCurrentDue}:* ${fmt(currentBalance)}
-----------------------------
-Thank you for your business! - ${shop.shop_name}`;
+  // Single Canonical WhatsApp & Text Receipt (Zero Drift Guarantee)
+  const receiptText = buildWhatsAppMessage({
+    type: 'RECEIPT',
+    customer: activeCustomer,
+    shop,
+    language,
+    transaction,
+    receiptDetails: details,
+  });
 
   // Phone validation & WhatsApp URL resolution
   const cleanPhone = (activeCustomer.phone_number || '').trim();
@@ -368,11 +365,16 @@ Thank you for your business! - ${shop.shop_name}`;
               <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Customer Details</div>
               <div className="font-black text-slate-900 text-sm">{customer.display_label || customer.name}</div>
               
-              {/* Requirement #12: Omit address if empty */}
+              {/* Requirement #12: Omit address if empty - Clear Customer Address Label */}
               {customerAddressStr && (
                 <div className="text-slate-600 font-medium flex items-start space-x-1">
                   <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
-                  <span>{customerAddressStr}</span>
+                  <span>
+                    <span className="font-bold text-slate-700">
+                      {language === 'bn' ? 'কাস্টমারের ঠিকানা: ' : language === 'hi' ? 'ग्राहक का पता: ' : 'Customer Address: '}
+                    </span>
+                    {customerAddressStr}
+                  </span>
                 </div>
               )}
               {activeCustomer.phone_number ? (
@@ -506,10 +508,51 @@ Thank you for your business! - ${shop.shop_name}`;
                   <span className="font-black text-sm text-slate-900 uppercase">Grand Total:</span>
                   <div className="text-[10px] text-slate-400 font-bold uppercase">{typeLabel}</div>
                 </div>
-                <span className={`text-2xl font-black ${mode === 'credit_sale' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                <span className={`text-2xl font-black ${mode === 'credit_sale' || mode === 'emi_plan' ? 'text-rose-600' : 'text-emerald-600'}`}>
                   {fmt(txAmt)}
                 </span>
               </div>
+            </div>
+          )}
+
+          {/* EMI PAYMENT SCHEDULE CARD */}
+          {(mode === 'emi_plan' || details?.emi_details) && details?.emi_details && (
+            <div className="bg-purple-50/90 p-4 rounded-2xl border border-purple-200 space-y-2 text-xs">
+              <div className="flex items-center justify-between border-b border-purple-200 pb-1.5">
+                <span className="font-extrabold uppercase text-[10px] text-purple-900 tracking-wider flex items-center space-x-1">
+                  <span>🏦</span>
+                  <span>{language === 'bn' ? 'কিস্তি পরিশোধ পরিকল্পনা (EMI)' : language === 'hi' ? 'किस्त भुगतान योजना (EMI)' : 'EMI Payment Schedule'}</span>
+                </span>
+                <span className="font-mono text-xs bg-purple-200 text-purple-900 px-2 py-0.5 rounded font-black">
+                  {details.emi_details.installment_count} {language === 'bn' ? 'টি কিস্তি' : language === 'hi' ? 'किस्तें' : 'EMIs'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-slate-700">
+                <div>
+                  <div className="text-[10px] text-slate-500 font-semibold">{language === 'bn' ? 'মোট বিক্রয়' : language === 'hi' ? 'कुल मूल्य' : 'Total Amount'}</div>
+                  <div className="font-bold text-slate-900">{fmt(details.emi_details.total_amount)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-500 font-semibold">{language === 'bn' ? 'ডাউন পেমেন্ট' : language === 'hi' ? 'डाउन पेमेंट' : 'Down Payment'}</div>
+                  <div className="font-bold text-emerald-700">{fmt(details.emi_details.down_payment)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-500 font-semibold">{language === 'bn' ? 'বাকি কিস্তি ঋণ' : language === 'hi' ? 'किस्त ऋण' : 'Financed Amount'}</div>
+                  <div className="font-bold text-rose-700">{fmt(details.emi_details.financed_amount)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-500 font-semibold">{language === 'bn' ? 'মাসিক কিস্তি' : language === 'hi' ? 'मासिक किस्त' : 'Monthly EMI'}</div>
+                  <div className="font-black text-purple-700 text-sm">{fmt(details.emi_details.installment_amount)}</div>
+                </div>
+              </div>
+
+              {details.emi_details.start_date && (
+                <div className="text-[11px] text-purple-900 font-semibold pt-1 border-t border-purple-200/60 flex justify-between">
+                  <span>{language === 'bn' ? 'প্রথম কিস্তির তারিখ:' : language === 'hi' ? 'पहली किस्त तिथि:' : 'First EMI Due Date:'}</span>
+                  <span className="font-bold">{details.emi_details.start_date}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -563,6 +606,37 @@ Thank you for your business! - ${shop.shop_name}`;
                 <div className="flex justify-between items-center pt-2 border-t border-slate-800">
                   <div>
                     <span className="font-black text-white text-sm">Total Outstanding Due:</span>
+                  </div>
+                  <span className="text-2xl font-black text-rose-400">
+                    {fmt(currentBalance)}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {/* EMI Plan Layout */}
+            {mode === 'emi_plan' && (
+              <>
+                {((details?.paid_amount !== undefined && details.paid_amount > 0) || (details?.emi_details?.down_payment && details.emi_details.down_payment > 0)) ? (
+                  <div className="flex justify-between items-center text-slate-300 font-medium">
+                    <span>{language === 'bn' ? 'ডাউন পেমেন্ট জমা:' : language === 'hi' ? 'डाउन पेमेंट जमा:' : 'Down Payment Paid:'}</span>
+                    <span className="font-black text-emerald-400">{fmt(details?.paid_amount || details?.emi_details?.down_payment || 0)}</span>
+                  </div>
+                ) : null}
+
+                <div className="flex justify-between items-center text-slate-300 font-medium">
+                  <span>{language === 'bn' ? 'বাকি কিস্তি ঋণ:' : language === 'hi' ? 'किस्त ऋण बकाया:' : 'Financed on EMI:'}</span>
+                  <span className="font-black text-rose-400">{fmt(details?.emi_details?.financed_amount || details?.new_due_amount || txAmt)}</span>
+                </div>
+
+                <div className="flex justify-between items-center text-slate-400 font-semibold pb-1 border-b border-slate-800">
+                  <span>{language === 'bn' ? 'পূর্বের বাকি:' : language === 'hi' ? 'पिछला बकाया:' : 'Previous Due:'}</span>
+                  <span className="font-black text-slate-200 text-sm">{fmt(prevBalance)}</span>
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+                  <div>
+                    <span className="font-black text-white text-sm">{language === 'bn' ? 'বর্তমান মোট বাকি:' : language === 'hi' ? 'वर्तमान कुल बकाया:' : 'Total Outstanding Due:'}</span>
                   </div>
                   <span className="text-2xl font-black text-rose-400">
                     {fmt(currentBalance)}

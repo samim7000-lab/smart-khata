@@ -6,7 +6,7 @@ import { calculateGst, ALLOWED_GST_RATES, GstCalculationResult } from '../lib/gs
 import { formatShopCurrency, resolveCurrencySymbol } from '../lib/countryPricing';
 import { validatePhoneNumber } from '../lib/phoneValidation';
 import { getCountryByCode } from '../data/countries';
-import { EMIForm, EMIPayloadData } from './EMIForm';
+import { type EMIPayloadData } from './EMIForm';
 import {
   X,
   Search,
@@ -118,6 +118,15 @@ export const AddTransactionModal: React.FC<Props> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // EMI Schedule State (Used when txMode === 'emi_plan')
+  const [emiDownPaymentStr, setEmiDownPaymentStr] = useState('0');
+  const [emiInstallmentCount, setEmiInstallmentCount] = useState<number>(6);
+  const [emiFirstDueDate, setEmiFirstDueDate] = useState<string>(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1);
+    return d.toISOString().split('T')[0];
+  });
+
   // Progressive Disclosure Accordion State
   const [showAdvancedDetails, setShowAdvancedDetails] = useState<boolean>(false);
 
@@ -223,7 +232,7 @@ export const AddTransactionModal: React.FC<Props> = ({
   // Real-Time Financial & Ledger Calculations
   const itemsSubtotal = items.reduce((sum, item) => sum + item.total, 0);
   const enteredVal = parseFloat(amountStr) || 0;
-  const isSaleMode = txMode === 'cash_sale' || txMode === 'credit_sale';
+  const isSaleMode = txMode === 'cash_sale' || txMode === 'credit_sale' || txMode === 'emi_plan';
 
   const rawSubtotal = isSaleMode
     ? (items.length > 0 ? itemsSubtotal : enteredVal)
@@ -258,6 +267,13 @@ export const AddTransactionModal: React.FC<Props> = ({
   const paidNowVal = Math.max(0, parseFloat(paidNowStr) || 0);
   const newPurchaseDue = Math.max(0, grandTotalAmount - paidNowVal);
 
+  // EMI Schedule Calculations
+  const emiDownPaymentVal = Math.max(0, parseFloat(emiDownPaymentStr) || 0);
+  const emiFinancedAmount = Math.max(0, grandTotalAmount - emiDownPaymentVal);
+  const emiMonthlyInstallment = emiInstallmentCount > 0
+    ? Math.round((emiFinancedAmount / emiInstallmentCount) * 100) / 100
+    : 0;
+
   // Authoritative Customer Balance from Database
   const previousDue = selectedCustomer?.balance || 0;
 
@@ -267,6 +283,8 @@ export const AddTransactionModal: React.FC<Props> = ({
     remainingDue = Math.max(0, previousDue);
   } else if (txMode === 'credit_sale') {
     remainingDue = previousDue + newPurchaseDue;
+  } else if (txMode === 'emi_plan') {
+    remainingDue = previousDue + emiFinancedAmount;
   } else if (txMode === 'due_payment') {
     remainingDue = Math.max(0, previousDue - enteredVal);
   }
@@ -282,6 +300,11 @@ export const AddTransactionModal: React.FC<Props> = ({
 
     if (isSaleMode && grandTotalAmount <= 0) {
       alert(language === 'bn' ? 'সঠিক পরিমাণ বা পণ্যের মূল্য লিখুন।' : 'Please enter item price or transaction amount.');
+      return;
+    }
+
+    if (txMode === 'emi_plan' && emiDownPaymentVal > grandTotalAmount) {
+      alert(language === 'bn' ? 'ডাউন পেমেন্ট মোট টাকার থেকে বেশি হতে পারবে না।' : 'Down payment cannot exceed total amount.');
       return;
     }
 
@@ -308,9 +331,28 @@ export const AddTransactionModal: React.FC<Props> = ({
       };
     }
 
+    const emiPayloadData: EMIPayloadData | undefined = txMode === 'emi_plan' ? {
+      product_name: items.length > 0 ? items.map((i) => i.name).join(', ') : (note.trim() || 'EMI Purchase'),
+      total_amount: grandTotalAmount,
+      down_payment: emiDownPaymentVal,
+      financed_amount: emiFinancedAmount,
+      installment_count: emiInstallmentCount,
+      installment_amount: emiMonthlyInstallment,
+      start_date: emiFirstDueDate,
+      notes: note.trim(),
+    } : undefined;
+
     const receiptDetails: ReceiptDetailsPayload = {
       mode: txMode,
-      items: isSaleMode && items.length > 0 ? items : undefined,
+      items: isSaleMode && items.length > 0 ? items : (
+        txMode === 'emi_plan' ? [{
+          id: 'emi-item',
+          name: note.trim() || 'EMI Purchase',
+          quantity: 1,
+          unit_price: grandTotalAmount,
+          total: grandTotalAmount,
+        }] : undefined
+      ),
       discount_type: isDiscountEnabled && discountVal > 0 ? discountType : undefined,
       discount_value: isDiscountEnabled && discountVal > 0 ? discountVal : undefined,
       discount_amount: discountAmount > 0 ? discountAmount : undefined,
@@ -318,27 +360,37 @@ export const AddTransactionModal: React.FC<Props> = ({
       taxable_amount: isSaleMode ? gstCalc.baseAmount : undefined,
       gst_price_mode: isGstEnabled ? gstPriceMode : undefined,
       previous_balance: previousDue,
-      paid_amount: txMode === 'cash_sale' ? grandTotalAmount : (txMode === 'credit_sale' ? paidNowVal : enteredVal),
-      new_due_amount: txMode === 'credit_sale' ? newPurchaseDue : 0,
+      paid_amount: txMode === 'cash_sale' ? grandTotalAmount : (txMode === 'credit_sale' ? paidNowVal : (txMode === 'emi_plan' ? emiDownPaymentVal : enteredVal)),
+      new_due_amount: txMode === 'credit_sale' ? newPurchaseDue : (txMode === 'emi_plan' ? emiFinancedAmount : 0),
       payment_method: paymentMethod,
       gst_enabled: isGstEnabled,
       customer_address: customerAddress.trim() || undefined,
       customer_gstin: customerGstin.trim() || undefined,
       notes: note.trim() || undefined,
+      emi_details: emiPayloadData ? {
+        product_name: emiPayloadData.product_name,
+        total_amount: emiPayloadData.total_amount,
+        down_payment: emiPayloadData.down_payment,
+        financed_amount: emiPayloadData.financed_amount,
+        installment_count: emiPayloadData.installment_count,
+        installment_amount: emiPayloadData.installment_amount,
+        start_date: emiPayloadData.start_date,
+      } : undefined,
     };
 
-    const targetType: TransactionType = txMode === 'credit_sale' ? 'credit_given' : 'payment_received';
-    const targetAmount = txMode === 'due_payment' ? enteredVal : grandTotalAmount;
+    const targetType: TransactionType = (txMode === 'credit_sale' || txMode === 'emi_plan') ? 'credit_given' : 'payment_received';
+    const targetAmount = txMode === 'due_payment' ? enteredVal : (txMode === 'emi_plan' ? emiFinancedAmount : grandTotalAmount);
+    const targetNote = txMode === 'emi_plan' ? `EMI: ${emiPayloadData?.product_name || 'Purchase'}` : note.trim();
 
     onSave(
       selectedCustomer.id,
       targetType,
       targetAmount,
-      note.trim(),
+      targetNote,
       newCustPayload,
       isGstEnabled ? gstCalc : undefined,
       undefined,
-      undefined,
+      emiPayloadData,
       receiptDetails
     );
   };
@@ -354,7 +406,7 @@ export const AddTransactionModal: React.FC<Props> = ({
     2: t.step_title_2,
     3: t.step_title_3,
     4: t.step_title_4,
-    5: t.step_title_5,
+    5: txMode === 'emi_plan' ? t.step_title_5_emi : t.step_title_5,
     6: t.step_title_6,
   };
 
@@ -675,6 +727,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                     type="button"
                     onClick={() => {
                       setTxMode('emi_plan');
+                      setCurrentStep(3);
                     }}
                     className={`p-4 rounded-2xl border-2 flex items-center justify-between transition-all text-left group ${
                       txMode === 'emi_plan'
@@ -697,44 +750,6 @@ export const AddTransactionModal: React.FC<Props> = ({
                   </button>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* RENDER INLINE EMI FORM WHEN EMI MODE SELECTED */}
-          {txMode === 'emi_plan' && currentStep === 2 && selectedCustomer && (
-            <div className="pt-2">
-              <EMIForm
-                shop={shop}
-                customers={customers}
-                selectedCustomer={selectedCustomer}
-                language={language}
-                initialAmount={enteredVal}
-                initialNote={note}
-                onSaveEMI={(emiData) => {
-                  let newCustPayload;
-                  if (selectedCustomer?.id.startsWith('temp-')) {
-                    newCustPayload = {
-                      name: selectedCustomer.name,
-                      phone: selectedCustomer.phone_number,
-                      displayLabel: selectedCustomer.display_label,
-                      state: selectedCustomer.state,
-                      address: customerAddress,
-                      gstin: customerGstin,
-                    };
-                  }
-                  onSave(
-                    selectedCustomer ? selectedCustomer.id : (emiData.customer_id || ''),
-                    'credit_given',
-                    emiData.financed_amount,
-                    `EMI: ${emiData.product_name}`,
-                    newCustPayload,
-                    undefined,
-                    undefined,
-                    emiData
-                  );
-                }}
-                onCancel={() => setTxMode('credit_sale')}
-              />
             </div>
           )}
 
@@ -1011,6 +1026,24 @@ export const AddTransactionModal: React.FC<Props> = ({
                 )}
               </div>
 
+              {/* CUSTOMER ADDRESS REVIEW / EDIT */}
+              <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center">
+                    <MapPin className="w-4 h-4 mr-1 text-blue-600 dark:text-blue-400" />
+                    <span>{t.customer_address}</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-semibold">{t.email_optional.split(' ')[1] || 'Optional'}</span>
+                </div>
+                <input
+                  type="text"
+                  value={customerAddress}
+                  onChange={(e) => setCustomerAddress(e.target.value)}
+                  placeholder="Street, City, Postal Code"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl text-xs font-medium outline-none"
+                />
+              </div>
+
               {/* Step Navigation Buttons */}
               <div className="flex space-x-2 pt-2">
                 <button
@@ -1092,6 +1125,80 @@ export const AddTransactionModal: React.FC<Props> = ({
                     <div className="flex justify-between items-center text-slate-900 dark:text-slate-100 font-black text-sm pt-2 border-t border-rose-200 dark:border-rose-800">
                       <span>{t.total_outstanding_due}:</span>
                       <span className="text-rose-600 dark:text-rose-400 text-base">{formatShopCurrency(remainingDue, shop?.country, shop?.currency_code)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* EMI PLAN SCHEDULE & DOWN PAYMENT CONFIGURATION */}
+              {txMode === 'emi_plan' && (
+                <div className="bg-purple-50/90 dark:bg-purple-950/70 p-4 rounded-2xl border border-purple-200 dark:border-purple-800 space-y-3 text-xs">
+                  <div className="flex items-center justify-between border-b border-purple-200/70 dark:border-purple-800 pb-2">
+                    <span className="font-extrabold uppercase text-[10px] text-purple-900 dark:text-purple-200 tracking-wider flex items-center space-x-1">
+                      <span>🏦</span>
+                      <span>{t.emi_schedule_title}</span>
+                    </span>
+                    <span className="font-black text-xs text-purple-700 dark:text-purple-300">
+                      {formatShopCurrency(grandTotalAmount, shop?.country, shop?.currency_code)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-black text-slate-800 dark:text-slate-200">
+                        {t.down_payment_label} ({t.paid_now_label.split(' ')[0] || 'Paid Now'})
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="e.g. 5000"
+                        value={emiDownPaymentStr}
+                        onChange={(e) => setEmiDownPaymentStr(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700 text-slate-900 dark:text-slate-100 rounded-xl text-xs font-black outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-black text-slate-800 dark:text-slate-200">
+                        {t.total_installments}
+                      </label>
+                      <select
+                        value={emiInstallmentCount}
+                        onChange={(e) => setEmiInstallmentCount(Number(e.target.value))}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700 text-slate-900 dark:text-slate-100 rounded-xl text-xs font-bold outline-none"
+                      >
+                        {[3, 6, 9, 12, 18, 24].map((cnt) => (
+                          <option key={cnt} value={cnt}>
+                            {cnt} {language === 'bn' ? 'টি কিস্তি' : language === 'hi' ? 'किस्तें' : 'Monthly EMIs'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-black text-slate-800 dark:text-slate-200">
+                      {t.first_due_date}
+                    </label>
+                    <input
+                      type="date"
+                      value={emiFirstDueDate}
+                      onChange={(e) => setEmiFirstDueDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700 text-slate-900 dark:text-slate-100 rounded-xl text-xs font-bold outline-none"
+                    />
+                  </div>
+
+                  {/* Real-time Calculation Summary Card */}
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-purple-200 dark:border-purple-800 grid grid-cols-2 gap-2 text-[11px]">
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400 text-[10px] block font-semibold">{t.financed_amount_label}:</span>
+                      <span className="font-extrabold text-rose-600 dark:text-rose-400">{formatShopCurrency(emiFinancedAmount, shop?.country, shop?.currency_code)}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400 text-[10px] block font-semibold">{t.monthly_installment_label}:</span>
+                      <span className="font-black text-purple-600 dark:text-purple-300 text-xs">
+                        {formatShopCurrency(emiMonthlyInstallment, shop?.country, shop?.currency_code)} / mo
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1188,6 +1295,10 @@ export const AddTransactionModal: React.FC<Props> = ({
                       alert(language === 'bn' ? 'সঠিক জমার পরিমাণ লিখুন।' : 'Please enter a valid payment amount.');
                       return;
                     }
+                    if (txMode === 'emi_plan' && emiDownPaymentVal > grandTotalAmount) {
+                      alert(language === 'bn' ? 'ডাউন পেমেন্ট মোট টাকার থেকে বেশি হতে পারবে না।' : 'Down payment cannot exceed total amount.');
+                      return;
+                    }
                     setCurrentStep(6);
                   }}
                   className="flex-1 py-3 bg-blue-600 text-white font-black rounded-xl text-xs hover:bg-blue-700 transition-colors flex items-center justify-center space-x-1 shadow-md"
@@ -1208,7 +1319,7 @@ export const AddTransactionModal: React.FC<Props> = ({
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <span className="font-extrabold uppercase text-[10px] text-blue-400 tracking-wider">{t.tx_summary}</span>
                   <span className="font-black text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30">
-                    {txMode === 'cash_sale' ? t.cash_sale_title.split(' ')[0] : txMode === 'credit_sale' ? t.credit_sale_title.split(' ')[0] : t.due_payment_title.split(' ')[0]}
+                    {txMode === 'cash_sale' ? t.cash_sale_title.split(' ')[0] : txMode === 'credit_sale' ? t.credit_sale_title.split(' ')[0] : txMode === 'emi_plan' ? (language === 'bn' ? 'কিস্তি বিক্রয় (EMI)' : language === 'hi' ? 'किस्त बिक्री (EMI)' : 'EMI Plan') : t.due_payment_title.split(' ')[0]}
                   </span>
                 </div>
 
@@ -1278,6 +1389,23 @@ export const AddTransactionModal: React.FC<Props> = ({
                       <div className="flex justify-between text-rose-400">
                         <span>{t.new_purchase_due}:</span>
                         <span>{formatShopCurrency(newPurchaseDue, shop?.country, shop?.currency_code)}</span>
+                      </div>
+                    </>
+                  )}
+
+                  {txMode === 'emi_plan' && (
+                    <>
+                      <div className="flex justify-between text-emerald-400">
+                        <span>{t.down_payment_label}:</span>
+                        <span>{formatShopCurrency(emiDownPaymentVal, shop?.country, shop?.currency_code)}</span>
+                      </div>
+                      <div className="flex justify-between text-rose-400">
+                        <span>{t.financed_amount_label}:</span>
+                        <span>{formatShopCurrency(emiFinancedAmount, shop?.country, shop?.currency_code)}</span>
+                      </div>
+                      <div className="flex justify-between text-purple-300">
+                        <span>{t.monthly_installment_label}:</span>
+                        <span>{formatShopCurrency(emiMonthlyInstallment, shop?.country, shop?.currency_code)} × {emiInstallmentCount} mo</span>
                       </div>
                     </>
                   )}
