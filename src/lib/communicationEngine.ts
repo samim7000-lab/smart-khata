@@ -2,6 +2,7 @@ import { Customer, Shop } from '../types';
 import { formatShopCurrency } from './countryPricing';
 import { MetaCloudApiService } from './metaCloudApi';
 import { formatWhatsAppNumber } from './whatsappUtils';
+import { openWhatsAppChat } from './whatsappService';
 
 export interface DispatchMessagePayload {
   recipient: Customer;
@@ -98,44 +99,6 @@ export class WhatsAppDirectLinkProvider implements IDeliveryProvider {
   async dispatch(payload: DispatchMessagePayload): Promise<DispatchResult> {
     const formattedText = replaceMessageVariables(payload.rawText, payload.recipient, payload.shop);
 
-    // 1. Check Web Share API with files if media file is attached (Mobile Chrome / Safari)
-    if (payload.mediaFile && typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
-      try {
-        const canShareFiles = navigator.canShare({ files: [payload.mediaFile] });
-        if (canShareFiles) {
-          console.log('[WHATSAPP DISPATCH] Web Share API file attachment supported. Triggering native share sheet...');
-          await navigator.share({
-            files: [payload.mediaFile],
-            text: formattedText,
-          });
-
-          return {
-            success: true,
-            messageId: `manual-${Date.now()}`,
-            provider: 'manual_share',
-            status: 'Shared Manually',
-            dispatchedAt: new Date().toISOString(),
-            formattedText,
-          };
-        }
-      } catch (shareErr: any) {
-        if (shareErr.name === 'AbortError') {
-          console.log('[WHATSAPP DISPATCH] Native share sheet dismissed by merchant');
-          return {
-            success: false,
-            messageId: `manual-${Date.now()}`,
-            provider: 'manual_share',
-            status: 'Cancelled',
-            dispatchedAt: new Date().toISOString(),
-            formattedText,
-            error: 'User cancelled share dialog',
-          };
-        }
-        console.warn('[WHATSAPP DISPATCH] Native file share error, falling back to direct link:', shareErr);
-      }
-    }
-
-    // 2. Direct WhatsApp Web / Mobile App URL Launch
     let fullText = '';
     if (payload.mediaUrl && !payload.mediaUrl.startsWith('blob:')) {
       fullText = `📄 Attached Media: ${payload.mediaUrl}\n\n${formattedText}`;
@@ -146,7 +109,8 @@ export class WhatsAppDirectLinkProvider implements IDeliveryProvider {
     const cleanPhone = formatWhatsAppNumber(payload.recipient.phone_number, payload.shop?.country);
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(fullText)}`;
 
-    window.open(url, '_blank');
+    // Universal mobile-aware WhatsApp dispatch
+    openWhatsAppChat(url);
 
     return {
       success: true,

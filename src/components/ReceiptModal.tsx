@@ -192,17 +192,13 @@ Thank you for your business! - ${shop.shop_name}`;
     }
   };
 
-  // WhatsApp Native Share or Direct Link Share via Unified dispatchWhatsApp
-  const handleShareNativeOrDownload = async () => {
+  // Direct WhatsApp dispatch - Instant, 0 delay, 100% reliable, never blocks on image generation
+  const handleSendWhatsApp = async () => {
     const valResult = validateCustomerPhone(activeCustomer.phone_number, shop?.country || 'IN', language);
     if (!valResult.isValid) {
       setIsPhoneModalOpen(true);
       return;
     }
-
-    setIsGenerating(true);
-    const file = await generateCanvasFile();
-    setIsGenerating(false);
 
     const res = await dispatchWhatsApp({
       type: 'RECEIPT',
@@ -211,32 +207,12 @@ Thank you for your business! - ${shop.shop_name}`;
       language,
       transaction,
       receiptDetails: details,
-      mediaFile: file,
     });
 
     if (res.success) {
-      if (res.action === 'native_shared') {
-        setToastMsg('✅ ' + (language === 'bn' ? 'শেয়ার উইন্ডো খোলা হয়েছে' : 'Shared via device sheet'));
-      } else if (res.action === 'meta_cloud_sent') {
-        setToastMsg('✅ ' + res.statusMessage);
-      } else {
-        // Deep link opened - download image fallback for desktop / non-canShare mobile browsers
-        if (file && typeof navigator !== 'undefined' && (!navigator.canShare || !navigator.canShare({ files: [file] }))) {
-          const url = URL.createObjectURL(file);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = file.name;
-          link.click();
-          URL.revokeObjectURL(url);
-        }
-        setToastMsg('🚀 ' + (language === 'bn' ? 'হোয়াটসঅ্যাপ খোলা হয়েছে! চ্যাটে সেন্ড বাটনে চাপ দিন।' : language === 'hi' ? 'व्हाट्सएप खुल गया! कृपया चैट में सेंड बटन दबाएं।' : 'WhatsApp opened / Ready to send (Tap Send in chat)'));
-      }
+      setToastMsg(res.statusMessage);
     } else {
-      if (res.action === 'cancelled') {
-        setToastMsg('ℹ️ ' + (language === 'bn' ? 'বাতিল করা হয়েছে' : 'Cancelled'));
-      } else {
-        setToastMsg('⚠️ ' + (res.statusMessage || 'Failed to dispatch WhatsApp'));
-      }
+      setToastMsg('⚠️ ' + (res.statusMessage || 'Failed to open WhatsApp'));
     }
     setTimeout(() => setToastMsg(''), 5000);
   };
@@ -669,18 +645,11 @@ Thank you for your business! - ${shop.shop_name}`;
           {/* Primary Action: Send on WhatsApp */}
           <button
             type="button"
-            disabled={isGenerating}
-            onClick={handleShareNativeOrDownload}
-            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-emerald-600/30 flex items-center justify-center space-x-2 transition-all active:scale-[0.98] disabled:opacity-60"
+            onClick={handleSendWhatsApp}
+            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-emerald-600/30 flex items-center justify-center space-x-2 transition-all active:scale-[0.98]"
           >
-            {isGenerating ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <>
-                <MessageCircle className="w-5 h-5 fill-current" />
-                <span>Send on WhatsApp</span>
-              </>
-            )}
+            <MessageCircle className="w-5 h-5 fill-current" />
+            <span>Send on WhatsApp</span>
           </button>
 
           {/* Multi Control Action Grid */}

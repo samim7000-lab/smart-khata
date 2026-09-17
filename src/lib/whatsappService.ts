@@ -366,13 +366,66 @@ export function buildWhatsAppMessage(options: WhatsAppMessageOptions): string {
 }
 
 /**
+ * Helper to detect mobile environment (Android, iOS, etc.)
+ */
+export function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || '');
+}
+
+/**
+ * Universally launches WhatsApp on Mobile and Desktop:
+ * - On Mobile (Android / iOS): Direct link navigation cleanly hands off to the native
+ *   WhatsApp application via App Links / Universal Links, bypassing popup blockers entirely.
+ * - On Desktop: Opens in a new tab so the merchant stays in the Smart Khata app.
+ */
+export function openWhatsAppChat(chatUrl: string): void {
+  if (typeof window === 'undefined' || !chatUrl) return;
+
+  if (isMobileDevice()) {
+    // Canonical mobile navigation: reliable across Android Chrome, iOS Safari, Samsung Internet, and PWAs
+    const link = document.createElement('a');
+    link.href = chatUrl;
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      if (link.parentNode) {
+        link.parentNode.removeChild(link);
+      }
+    }, 100);
+  } else {
+    // Desktop browser: open new tab for WhatsApp Web
+    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+  }
+}
+
+// Global in-memory diagnostic state for safe development troubleshooting
+export interface WhatsAppDiagnosticRecord {
+  timestamp: string;
+  phoneInput: string;
+  cleanPhone: string;
+  valid: boolean;
+  type: WhatsAppMessageType;
+  messagePreview: string;
+  chatUrl: string;
+  isMobile: boolean;
+  dispatchAction: string;
+}
+
+let lastDiagnostic: WhatsAppDiagnosticRecord | null = null;
+
+export function getLastWhatsAppDiagnostic(): WhatsAppDiagnosticRecord | null {
+  return lastDiagnostic;
+}
+
+/**
  * 5. UNIFIED DISPATCH SERVICE
- * The single canonical execution path for sending or opening WhatsApp for any customer.
- * - Resolves customer phone
- * - Normalizes and validates phone
+ * The single canonical execution path for opening direct WhatsApp chat for any customer.
+ * - Resolves & normalizes customer phone
+ * - Validates phone
  * - Generates language-aware message
- * - Dispatches via native Web Share API (if media file present), official Meta Cloud API (if configured),
- *   or direct wa.me deep-link handoff.
+ * - Immediately hands off to WhatsApp directly without blocking popup blockers or hijacking to generic share sheets
  * - Returns honest status: NEVER claims "Message sent" for deep link handoff.
  */
 export async function dispatchWhatsApp(options: WhatsAppMessageOptions): Promise<WhatsAppSendResult> {
@@ -394,76 +447,72 @@ export async function dispatchWhatsApp(options: WhatsAppMessageOptions): Promise
 
   const cleanPhone = valResult.cleanPhone;
   const formattedMessage = buildWhatsAppMessage(options);
+  const chatUrl = getWhatsAppChatUrl(cleanPhone, formattedMessage, defaultCountry);
+  const isMobile = isMobileDevice();
 
-  // 2. Check Official Meta Cloud API (if enabled and connected)
+  // Record diagnostic
+  lastDiagnostic = {
+    timestamp: new Date().toISOString(),
+    phoneInput: customer.phone_number || '',
+    cleanPhone,
+    valid: true,
+    type: options.type,
+    messagePreview: formattedMessage.slice(0, 80),
+    chatUrl,
+    isMobile,
+    dispatchAction: 'opened_chat',
+  };
+
+  // Expose on window for easy developer inspection on physical phone (window.__SMART_KHATA_LAST_WA__)
+  if (typeof window !== 'undefined') {
+    (window as any).__SMART_KHATA_LAST_WA__ = lastDiagnostic;
+    if (window.location?.search?.includes('debug_wa=true') || localStorage?.getItem('smart_khata_debug_wa') === 'true') {
+      console.group('[WHATSAPP-DIAGNOSTICS]');
+      console.log('1. Raw Input:', customer.phone_number);
+      console.log('2. Normalized Number:', cleanPhone);
+      console.log('3. Is Mobile:', isMobile);
+      console.log('4. Destination URL:', chatUrl);
+      console.log('5. Message Preview:', formattedMessage.slice(0, 100) + '...');
+      console.groupEnd();
+    }
+  }
+
+  // 2. Check Official Meta Cloud API ONLY IF explicitly enabled/connected in local storage cache
+  // This avoids a blocking Supabase network query on every single click, maintaining instantaneous user-gesture responsiveness!
   try {
-    const conn = await MetaCloudApiService.getConnection(shop.id);
-    if (conn && conn.status === 'CONNECTED') {
-      console.log(`[WHATSAPP-SERVICE] Meta Cloud API is CONNECTED. Dispatching official message to ${cleanPhone}`);
-      const apiRes = await MetaCloudApiService.sendMessage({
-        shop,
-        recipient: customer,
-        templateName: options.type === 'RECEIPT' ? 'receipt_notification' : 'payment_reminder',
-        messageText: formattedMessage,
-        mediaUrl: options.mediaUrl || undefined,
-      });
+    const cachedConnRaw = typeof localStorage !== 'undefined' ? localStorage.getItem(`smart_khata_wa_connection_${shop.id}`) : null;
+    if (cachedConnRaw) {
+      const cachedConn = JSON.parse(cachedConnRaw);
+      if (cachedConn && cachedConn.status === 'CONNECTED') {
+        console.log(`[WHATSAPP-SERVICE] Cached Meta Cloud API is CONNECTED. Dispatching official message to ${cleanPhone}`);
+        const apiRes = await MetaCloudApiService.sendMessage({
+          shop,
+          recipient: customer,
+          templateName: options.type === 'RECEIPT' ? 'receipt_notification' : 'payment_reminder',
+          messageText: formattedMessage,
+          mediaUrl: options.mediaUrl || undefined,
+        });
 
-      if (apiRes.success) {
-        return {
-          success: true,
-          action: 'meta_cloud_sent',
-          statusMessage: language === 'bn' ? 'বার্তা পাঠানো হয়েছে (Official Meta API)' : 'Message sent via Official Meta API',
-          cleanPhone,
-          formattedMessage,
-        };
+        if (apiRes.success) {
+          lastDiagnostic.dispatchAction = 'meta_cloud_sent';
+          return {
+            success: true,
+            action: 'meta_cloud_sent',
+            statusMessage: language === 'bn' ? 'বার্তা পাঠানো হয়েছে (Official Meta API)' : 'Message sent via Official Meta API',
+            cleanPhone,
+            formattedMessage,
+          };
+        }
+        console.warn('[WHATSAPP-SERVICE] Meta Cloud API call returned error, falling back to direct chat deep-link:', apiRes.error);
       }
-      console.warn('[WHATSAPP-SERVICE] Meta Cloud API call returned error, falling back to direct chat deep-link:', apiRes.error);
     }
   } catch (cloudErr) {
     console.warn('[WHATSAPP-SERVICE] Meta Cloud API check failed, falling back to deep-link:', cloudErr);
   }
 
-  // 3. Web Share API with File Attachment (Mobile Safari / Chrome)
-  if (options.mediaFile && typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
-    try {
-      const canShareFiles = navigator.canShare({ files: [options.mediaFile] });
-      if (canShareFiles) {
-        console.log('[WHATSAPP-SERVICE] Web Share API file attachment supported. Triggering native share sheet...');
-        await navigator.share({
-          title: `${shop.shop_name} Receipt`,
-          text: formattedMessage,
-          files: [options.mediaFile],
-        });
-
-        return {
-          success: true,
-          action: 'native_shared',
-          statusMessage: language === 'bn' ? 'শেয়ার উইন্ডো খোলা হয়েছে' : 'Shared via device sheet',
-          cleanPhone,
-          formattedMessage,
-        };
-      }
-    } catch (shareErr: any) {
-      if (shareErr.name === 'AbortError') {
-        return {
-          success: false,
-          action: 'cancelled',
-          statusMessage: language === 'bn' ? 'বাতিল করা হয়েছে' : 'Share cancelled by merchant',
-          cleanPhone,
-          formattedMessage,
-        };
-      }
-      console.warn('[WHATSAPP-SERVICE] Web Share error, falling back to direct wa.me link:', shareErr);
-    }
-  }
-
-  // 4. Standard Direct Deep-Link WhatsApp Launch
-  // Open direct chat for the customer number without requiring contact to be saved in phone address book.
-  const chatUrl = getWhatsAppChatUrl(cleanPhone, formattedMessage, defaultCountry);
-
-  if (typeof window !== 'undefined') {
-    window.open(chatUrl, '_blank');
-  }
+  // 3. Direct WhatsApp Chat Launch
+  // Opens direct chat for that customer number WITHOUT requiring contact saving and WITHOUT generic OS share sheet
+  openWhatsAppChat(chatUrl);
 
   return {
     success: true,
@@ -473,7 +522,7 @@ export async function dispatchWhatsApp(options: WhatsAppMessageOptions): Promise
         ? 'হোয়াটসঅ্যাপ খোলা হয়েছে! চ্যাটে সেন্ড বাটনে চাপ দিন।'
         : language === 'hi'
         ? 'व्हाट्सएप खुल गया! कृपया चैट में सेंड बटन दबाएं।'
-        : 'WhatsApp opened! Please tap Send inside chat.',
+        : 'WhatsApp opened / Ready to send (Tap Send in chat)',
     cleanPhone,
     chatUrl,
     formattedMessage,
