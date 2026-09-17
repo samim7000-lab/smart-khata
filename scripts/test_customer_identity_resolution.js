@@ -444,6 +444,99 @@ runTest('Case 20: Phone Conflict with Different Phone Format (+91 vs 0...)', () 
   assert.strictEqual(res.matchedCustomer, null);
 });
 
+// --------------------------------------------------------------------------
+// NEGATIVE SAFETY & FALSE-POSITIVE PREVENTION TESTS (PHASE 1 & PHASE 13)
+// --------------------------------------------------------------------------
+
+runTest('Negative Test 21: Similar phonetic names with different phones -> PHONE_CONFLICT', () => {
+  const localCusts = [
+    { id: 'c-1', shop_id: SHOP_A, name: 'Sameer Khan', phone_number: '9800000001', display_label: '', created_at: '' },
+  ];
+  const res = resolveCustomerIdentity({
+    extractedName: 'Samir Khan',
+    extractedPhone: '9800000002', // Different person!
+    shopId: SHOP_A,
+    customers: localCusts,
+  });
+  // Must NOT auto-match! Phone discrepancy takes precedence.
+  assert.strictEqual(res.status, 'PHONE_CONFLICT');
+  assert.strictEqual(res.matchedCustomer, null);
+});
+
+runTest('Negative Test 22: Short single-token name ("Das") with multiple matches -> AMBIGUOUS', () => {
+  const localCusts = [
+    { id: 'c-d1', shop_id: SHOP_A, name: 'Bikram Das', phone_number: '9800000011', display_label: '', created_at: '' },
+    { id: 'c-d2', shop_id: SHOP_A, name: 'Sanjay Das', phone_number: '9800000012', display_label: '', created_at: '' },
+  ];
+  const res = resolveCustomerIdentity({
+    extractedName: 'Das',
+    extractedPhone: '',
+    shopId: SHOP_A,
+    customers: localCusts,
+  });
+  assert.strictEqual(res.status, 'AMBIGUOUS');
+  assert.strictEqual(res.matchedCustomer, null);
+  assert.strictEqual(res.candidates.length, 2);
+});
+
+runTest('Negative Test 23: Dissimilar names with different phones -> NO_MATCH', () => {
+  const localCusts = [
+    { id: 'c-1', shop_id: SHOP_A, name: 'Subrata Roy', phone_number: '9800000021', display_label: '', created_at: '' },
+  ];
+  const res = resolveCustomerIdentity({
+    extractedName: 'Anil Kumar',
+    extractedPhone: '9800000099',
+    shopId: SHOP_A,
+    customers: localCusts,
+  });
+  assert.strictEqual(res.status, 'NO_MATCH');
+  assert.strictEqual(res.matchedCustomer, null);
+});
+
+runTest('Negative Test 24: OCR partial name typo with completely different phone -> PHONE_CONFLICT', () => {
+  const localCusts = [
+    { id: 'c-1', shop_id: SHOP_A, name: 'Rahim Sheikh', phone_number: '9800000031', display_label: '', created_at: '' },
+  ];
+  const res = resolveCustomerIdentity({
+    extractedName: 'Rahim Shekh',
+    extractedPhone: '9800000039', // 1 digit typo or different person
+    shopId: SHOP_A,
+    customers: localCusts,
+  });
+  // Must NOT match because phones differ!
+  assert.strictEqual(res.status, 'PHONE_CONFLICT');
+  assert.strictEqual(res.matchedCustomer, null);
+});
+
+runTest('Negative Test 25: Same phone with contradictory name -> PHONE_CONFLICT (no silent merge)', () => {
+  const localCusts = [
+    { id: 'c-1', shop_id: SHOP_A, name: 'Kalyan Mukherjee', phone_number: '9800000041', display_label: '', created_at: '' },
+  ];
+  const res = resolveCustomerIdentity({
+    extractedName: 'Tapan Ghosh',
+    extractedPhone: '9800000041',
+    shopId: SHOP_A,
+    customers: localCusts,
+  });
+  assert.strictEqual(res.status, 'PHONE_CONFLICT');
+  assert.strictEqual(res.matchedCustomer, null);
+  assert.strictEqual(res.candidates.length, 1);
+});
+
+runTest('Negative Test 26: Invalid short phone with dissimilar name -> NO_MATCH without crash', () => {
+  const localCusts = [
+    { id: 'c-1', shop_id: SHOP_A, name: 'Animesh Das', phone_number: '9800000051', display_label: '', created_at: '' },
+  ];
+  const res = resolveCustomerIdentity({
+    extractedName: 'Prabir Roy',
+    extractedPhone: '123', // Garbage/partial digits
+    shopId: SHOP_A,
+    customers: localCusts,
+  });
+  assert.strictEqual(res.status, 'NO_MATCH');
+  assert.strictEqual(res.matchedCustomer, null);
+});
+
 console.log('\n----------------------------------------------------');
 console.log(`🎉 ALL ${passedCount}/${totalCount} IDENTITY RESOLUTION TESTS PASSED!`);
 console.log('----------------------------------------------------\n');

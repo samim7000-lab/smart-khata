@@ -516,7 +516,7 @@ export function resolveCustomerIdentity({
   // Example: DB="Samim Gayen" (9876543210) vs OCR="Samim Gayen" (9999999999)
   // ------------------------------------------------------------------------
   const strongNameMatchesWithPhoneConflict = scoredList.filter(
-    (sc) => (sc.signals.nameExact || sc.signals.translitExact || sc.signals.nameSimilarity >= 0.85) && sc.signals.phoneConflict
+    (sc) => (sc.signals.nameExact || sc.signals.translitExact || sc.signals.phoneticExact || sc.signals.nameSimilarity >= 0.80) && sc.signals.phoneConflict
   );
   if (strongNameMatchesWithPhoneConflict.length > 0) {
     const conflictCand = strongNameMatchesWithPhoneConflict[0];
