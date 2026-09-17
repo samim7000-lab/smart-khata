@@ -18,7 +18,8 @@ import {
   MapPin,
   FileText,
   Tag,
-  Check
+  Check,
+  FlaskConical
 } from 'lucide-react';
 
 import { validatePhoneNumber } from '../lib/phoneValidation';
@@ -30,6 +31,7 @@ import { formatShopCurrency } from '../lib/countryPricing';
 import { unpackReceiptNote, calculatePreviousBalance } from '../lib/receiptUtils';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { CountryPhoneInput } from './CountryPhoneInput';
+import { WhatsAppExperimentLabModal } from './WhatsAppExperimentLabModal';
 
 interface Props {
   transaction: Transaction;
@@ -58,6 +60,7 @@ export const ReceiptModal: React.FC<Props> = ({
   const [isSavingPhone, setIsSavingPhone] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isLabOpen, setIsLabOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
 
   const isCredit = transaction.type === 'credit_given';
@@ -726,6 +729,16 @@ export const ReceiptModal: React.FC<Props> = ({
             <span>Send on WhatsApp</span>
           </button>
 
+          {/* Experimental Native Lab (Isolated POC - Does NOT affect primary button above) */}
+          <button
+            type="button"
+            onClick={() => setIsLabOpen(true)}
+            className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-200 flex items-center justify-center space-x-1.5 transition-colors"
+          >
+            <FlaskConical className="w-3.5 h-3.5 text-indigo-600" />
+            <span>🔬 WhatsApp Native Lab (Experimental POC)</span>
+          </button>
+
           {/* Multi Control Action Grid */}
           <div className="grid grid-cols-4 gap-1.5 pt-1">
             <button
@@ -815,6 +828,19 @@ export const ReceiptModal: React.FC<Props> = ({
           </div>
         </div>
       )}
+
+      {/* WhatsApp Native Intent Lab Modal (Isolated POC) */}
+      <WhatsAppExperimentLabModal
+        isOpen={isLabOpen}
+        onClose={() => setIsLabOpen(false)}
+        activeCustomer={activeCustomer}
+        shop={shop}
+        language={language}
+        transaction={transaction}
+        details={details}
+        receiptText={receiptText}
+        generateReceiptImage={generateCanvasFile}
+      />
     </div>
   );
 };
