@@ -242,9 +242,17 @@ export const ReceiptModal: React.FC<Props> = ({
     if (res.success) {
       setToastMsg(res.statusMessage);
       if (transaction.id) {
-        ScanWorkspaceService.markDraftSentByTransactionId(transaction.id);
+        if (res.action === 'meta_cloud_sent') {
+          ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'sent', shop.id);
+        } else {
+          // Direct wa.me deep link opened: semantically handed_off, NOT confirmed sent
+          ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'handed_off', shop.id);
+        }
       }
     } else {
+      if (transaction.id) {
+        ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'failed', shop.id);
+      }
       setToastMsg('⚠️ ' + (res.statusMessage || 'Failed to open WhatsApp'));
     }
     setTimeout(() => setToastMsg(''), 5000);

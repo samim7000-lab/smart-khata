@@ -83,7 +83,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
 
   // 1. Rehydrate active Scan Workspace from storage on mount (survives WhatsApp & App restart)
   useEffect(() => {
-    const existingWs = ScanWorkspaceService.loadWorkspace(shop.id);
+    const existingWs = ScanWorkspaceService.loadWorkspace(shop.id, shop.owner_id);
     if (existingWs && existingWs.drafts && existingWs.drafts.length > 0) {
       setDrafts(existingWs.drafts);
       setActiveDraftIndex(existingWs.activeDraftIndex || 0);
@@ -93,7 +93,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
         setViewMode('detail');
       }
     }
-  }, [shop.id]);
+  }, [shop.id, shop.owner_id]);
 
   // 2. Automatically sync active workspace to local storage (24-hour TTL, zero base64)
   useEffect(() => {
@@ -101,6 +101,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
       ScanWorkspaceService.saveWorkspace({
         workspaceId: `ws-${shop.id}`,
         shopId: shop.id,
+        userId: shop.owner_id,
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
         drafts,
@@ -108,7 +109,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
         status: drafts.every((d) => d.saveStatus === 'saved') ? 'completed' : 'in_progress',
       });
     }
-  }, [drafts, activeDraftIndex, shop.id]);
+  }, [drafts, activeDraftIndex, shop.id, shop.owner_id]);
 
   // Helper: Initialize a draft card from OCR data using Canonical Identity Resolver
   const createDraftFromData = (
@@ -171,7 +172,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
       amountBadge,
       confirmed: existingData?.confirmed || false,
       saveStatus: existingData?.saveStatus || 'pending',
-      whatsappStatus: existingData?.whatsappStatus || 'pending',
+      whatsappStatus: existingData?.whatsappStatus || 'ready',
       transactionId: existingData?.transactionId,
     };
   };
@@ -716,6 +717,8 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 {drafts.map((d, idx) => {
                   const isSaved = d.saveStatus === 'saved';
                   const isSent = d.whatsappStatus === 'sent';
+                  const isHandedOff = d.whatsappStatus === 'handed_off';
+                  const isFailed = d.whatsappStatus === 'failed';
                   const isNeedReview =
                     d.identityStatus === 'PHONE_CONFLICT' ||
                     d.identityStatus === 'AMBIGUOUS' ||
@@ -742,14 +745,26 @@ export const ScanLedgerModal: React.FC<Props> = ({
                             <span className="font-extrabold text-sm text-slate-900 dark:text-white truncate">
                               {d.customerName || '(No Name)'}
                             </span>
-                            {/* Status Badges */}
+                            {/* Semantic WhatsApp & Save Status Badges */}
                             {isSent && (
                               <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
                                 <Send className="w-2.5 h-2.5" />
                                 <span>✓ Sent</span>
                               </span>
                             )}
-                            {isSaved && !isSent && (
+                            {isHandedOff && (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 border border-teal-300">
+                                <ArrowRight className="w-2.5 h-2.5" />
+                                <span>↗ Chat Opened</span>
+                              </span>
+                            )}
+                            {isFailed && (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300">
+                                <AlertTriangle className="w-2.5 h-2.5" />
+                                <span>⚠ Send Failed</span>
+                              </span>
+                            )}
+                            {isSaved && !isSent && !isHandedOff && (
                               <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
                                 <Check className="w-2.5 h-2.5" />
                                 <span>✓ Saved</span>

@@ -26,6 +26,7 @@ interface Props {
   customers: Customer[];
   transactions: Transaction[];
   language: Language;
+  isPlanLoading?: boolean;
   onSelectCustomer: (customer: Customer) => void;
   onOpenAddTx: () => void;
   onOpenScanLedger: () => void;
@@ -39,6 +40,7 @@ export const Dashboard: React.FC<Props> = ({
   customers,
   transactions,
   language,
+  isPlanLoading = false,
   onSelectCustomer,
   onOpenAddTx,
   onOpenScanLedger,
@@ -82,7 +84,7 @@ export const Dashboard: React.FC<Props> = ({
   // Detect in-progress multi-scan batch for quick resume
   const activeBatch = useMemo(() => {
     if (!shop?.id) return null;
-    const ws = ScanWorkspaceService.loadWorkspace(shop.id);
+    const ws = ScanWorkspaceService.loadWorkspace(shop.id, shop?.owner_id);
     if (!ws || !ws.drafts || ws.drafts.length === 0) return null;
     const pendingCount = ws.drafts.filter((d) => d.saveStatus !== 'saved').length;
     if (pendingCount === 0) return null;
@@ -90,7 +92,7 @@ export const Dashboard: React.FC<Props> = ({
       total: ws.drafts.length,
       pending: pendingCount,
     };
-  }, [shop?.id]);
+  }, [shop?.id, shop?.owner_id]);
 
   const filteredCustomers = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -193,6 +195,12 @@ export const Dashboard: React.FC<Props> = ({
         <div className="flex items-center space-x-2">
           <button
             onClick={() => {
+              // PLAN_LOADING != FREE: If plan is still loading, never assume 'free' or show paywall
+              if (isPlanLoading) {
+                onOpenScanLedger();
+                return;
+              }
+
               let activeTier = shop?.plan_tier;
               if (!activeTier) {
                 try {
@@ -205,7 +213,14 @@ export const Dashboard: React.FC<Props> = ({
                   }
                 } catch {}
               }
-              const isEntitled = isFeatureEnabled('ocr_scanner', activeTier || 'free');
+
+              // If activeTier is still unresolved, do NOT assume 'free'
+              if (!activeTier) {
+                onOpenScanLedger();
+                return;
+              }
+
+              const isEntitled = isFeatureEnabled('ocr_scanner', activeTier);
               if (isEntitled) {
                 onOpenScanLedger();
               } else if (onOpenUpgrade) {

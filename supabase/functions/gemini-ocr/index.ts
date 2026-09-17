@@ -98,11 +98,11 @@ serve(async (req) => {
       );
     }
 
-    // 3b. OPTIONAL TENANT SHOP VERIFICATION
+    // 3b. OPTIONAL TENANT SHOP VERIFICATION & SERVER-SIDE ENTITLEMENT
     if (shopId && authenticatedUser && supabaseClient) {
       const { data: shopRecord, error: shopErr } = await supabaseClient
         .from('shops')
-        .select('id')
+        .select('id, plan_tier, created_at')
         .eq('id', shopId)
         .eq('owner_id', authenticatedUser.id)
         .maybeSingle();
@@ -120,6 +120,63 @@ serve(async (req) => {
         );
       }
       console.log(`[EDGE OCR SECURITY] Verified shop tenant ownership: ${shopId}`);
+
+      // 3c. SERVER-SIDE ENTITLEMENT VERIFICATION (AUTHORITATIVE BOUNDARY)
+      const currentTier = (shopRecord.plan_tier || '').toLowerCase();
+      let isEntitled = ['pro', 'business', 'enterprise'].includes(currentTier);
+
+      // If not directly pro/business, check active subscription or trial
+      if (!isEntitled) {
+        try {
+          const { data: subRecord } = await supabaseClient
+            .from('subscriptions')
+            .select('tier, status, trial_ends_at, current_period_end')
+            .eq('shop_id', shopId)
+            .maybeSingle();
+
+          if (subRecord) {
+            const subTier = (subRecord.tier || '').toLowerCase();
+            const isActive = subRecord.status === 'active' || subRecord.status === 'trialing';
+            const notExpired = !subRecord.current_period_end || new Date(subRecord.current_period_end).getTime() > Date.now();
+            const trialNotExpired = !subRecord.trial_ends_at || new Date(subRecord.trial_ends_at).getTime() > Date.now();
+
+            if (['pro', 'business', 'enterprise'].includes(subTier) && isActive && notExpired) {
+              isEntitled = true;
+            } else if (subRecord.status === 'trialing' && trialNotExpired) {
+              isEntitled = true;
+            }
+          }
+        } catch (subErr) {
+          console.warn('[EDGE OCR ENTITLEMENT] Subscription lookup notice:', subErr);
+        }
+      }
+
+      // Check 14-day default onboarding trial
+      if (!isEntitled && shopRecord.created_at) {
+        const createdAtMs = new Date(shopRecord.created_at).getTime();
+        const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+        if (Date.now() - createdAtMs < FOURTEEN_DAYS_MS) {
+          isEntitled = true;
+          console.log(`[EDGE OCR ENTITLEMENT] Shop ${shopId} entitled under 14-day onboarding trial.`);
+        }
+      }
+
+      // If tier is explicitly 'free' and no trial/subscription exists, reject request
+      if (currentTier === 'free' && !isEntitled) {
+        console.warn(`[EDGE OCR SECURITY] Entitlement rejected: Shop ${shopId} is on Free plan without active trial.`);
+        return new Response(
+          JSON.stringify({
+            is_valid_ledger: false,
+            status: 'entitlement_required',
+            reason_if_invalid: 'AI Handwriting Scanner requires an active Pro subscription or trial.',
+            error: 'Entitlement Required: AI Scanner is not available on Free tier.',
+            requiresUpgrade: true,
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      console.log(`[EDGE OCR ENTITLEMENT] Shop ${shopId} authorized for OCR processing.`);
     }
 
     // 4. READ SECRET STRICTLY FROM ENVIRONMENT

@@ -371,6 +371,7 @@ export const App: React.FC = () => {
             setIsAuthInitializing(false);
           } else if (event === 'SIGNED_OUT') {
             console.log('[AUTH] User signed out');
+            ScanWorkspaceService.clearAllUserWorkspaces();
             setActiveUserId(null);
             setShop(null);
             setCustomers([]);
@@ -1284,6 +1285,7 @@ export const App: React.FC = () => {
 
   const handleLogout = async () => {
     const currentLang = (localStorage.getItem('smart_khata_lang') as Language) || language || 'bn';
+    ScanWorkspaceService.clearAllUserWorkspaces(activeUserId || undefined);
     if (isSupabaseConfigured && supabase) {
       try {
         await supabase.auth.signOut();
@@ -1346,6 +1348,7 @@ export const App: React.FC = () => {
     }
 
     // Clear all local client cache and state
+    ScanWorkspaceService.clearAllUserWorkspaces(activeUserId || undefined);
     localStorage.removeItem('smart_khata_mock_shop');
     localStorage.removeItem('smart_khata_mock_customers');
     localStorage.removeItem('smart_khata_mock_transactions');
@@ -1454,6 +1457,7 @@ export const App: React.FC = () => {
                     customers={customers}
                     transactions={transactions}
                     language={language}
+                    isPlanLoading={isAuthInitializing}
                     onSelectCustomer={(c) => {
                       setSelectedCustomer(c);
                       setScreen('customer_detail');
@@ -1632,8 +1636,8 @@ export const App: React.FC = () => {
           transactions={transactions}
           onClose={() => {
             setReceiptModalData(null);
-            if (shop && ScanWorkspaceService.hasActiveWorkspace(shop.id)) {
-              const ws = ScanWorkspaceService.loadWorkspace(shop.id);
+            if (shop && ScanWorkspaceService.hasActiveWorkspace(shop.id, activeUserId || undefined)) {
+              const ws = ScanWorkspaceService.loadWorkspace(shop.id, activeUserId || undefined);
               if (ws && ws.drafts.some((d) => d.saveStatus !== 'saved')) {
                 setIsScanLedgerOpen(true);
               }
