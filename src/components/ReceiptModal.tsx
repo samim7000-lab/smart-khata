@@ -19,7 +19,8 @@ import {
   FileText,
   Tag,
   Check,
-  FlaskConical
+  FlaskConical,
+  FileImage
 } from 'lucide-react';
 
 import { validatePhoneNumber } from '../lib/phoneValidation';
@@ -697,6 +698,39 @@ export const ReceiptModal: React.FC<Props> = ({
           {noteText && (
             <div className="text-xs text-slate-600 italic bg-slate-50 p-2.5 rounded-xl border border-slate-200">
               📝 Note: {noteText}
+            </div>
+          )}
+
+          {/* SCANNED LEDGER PROOF PREVIEW (IF AVAILABLE) */}
+          {transaction.ledger_photo_url && (
+            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-1.5 print:hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider flex items-center space-x-1">
+                  <FileImage className="w-3.5 h-3.5 text-blue-600" />
+                  <span>{language === 'bn' ? 'সংযুক্ত খাতা পৃষ্ঠার ছবি' : language === 'hi' ? 'संलग्न खाता पृष्ठ' : 'Attached Ledger Photo Proof'}</span>
+                </span>
+                <a
+                  href={transaction.ledger_photo_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] font-bold text-blue-600 hover:underline"
+                >
+                  {language === 'bn' ? 'বড় করে দেখুন' : language === 'hi' ? 'बड़ा देखें' : 'View Full Image'} ↗
+                </a>
+              </div>
+              <a
+                href={transaction.ledger_photo_url}
+                target="_blank"
+                rel="noreferrer"
+                className="block overflow-hidden rounded-xl border border-slate-200 hover:opacity-95 transition-opacity max-w-xs"
+              >
+                <img
+                  src={transaction.ledger_photo_url}
+                  alt="Scanned Ledger Proof"
+                  crossOrigin="anonymous"
+                  className="w-full max-h-36 object-cover rounded-xl"
+                />
+              </a>
             </div>
           )}
 

@@ -120,3 +120,66 @@ export const uploadShopAsset = async (
   // Fallback for local / demo mode
   return compressedDataUrl;
 };
+
+/**
+ * Uploads handwritten ledger proof photo to Supabase Storage ('ledger_photos' bucket).
+ * Returns the public CDN URL to store in transactions.ledger_photo_url.
+ * Falls back gracefully if storage is unconfigured.
+ */
+export const uploadLedgerPhotoProof = async (
+  input: string | File,
+  shopId: string
+): Promise<string> => {
+  if (!isSupabaseConfigured || !supabase) {
+    if (typeof input === 'string') return input;
+    return await compressImage(input, 600, 600, 0.75);
+  }
+
+  try {
+    let blob: Blob;
+    if (typeof input === 'string') {
+      const res = await fetch(input);
+      blob = await res.blob();
+    } else {
+      const compressedDataUrl = await compressImage(input, 1200, 1200, 0.82);
+      const res = await fetch(compressedDataUrl);
+      blob = await res.blob();
+    }
+
+    const fileName = `${shopId}/ledger_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+
+    const { data, error } = await supabase.storage
+      .from('ledger_photos')
+      .upload(fileName, blob, {
+        contentType: 'image/jpeg',
+        cacheControl: '31536000',
+        upsert: true,
+      });
+
+    if (error) {
+      console.warn('[STORAGE] Upload to ledger_photos failed, falling back:', error.message);
+      // Fallback to shop-assets if ledger_photos bucket does not exist
+      const fallbackUpload = await supabase.storage
+        .from('shop-assets')
+        .upload(`ledger_${fileName}`, blob, { contentType: 'image/jpeg', upsert: true });
+
+      if (fallbackUpload.error) {
+        console.warn('[STORAGE] Fallback upload also failed, using compact thumbnail string:', fallbackUpload.error.message);
+        return '';
+      }
+      const { data: publicUrlData } = supabase.storage
+        .from('shop-assets')
+        .getPublicUrl(`ledger_${fileName}`);
+      return publicUrlData.publicUrl;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('ledger_photos')
+      .getPublicUrl(data.path);
+
+    return publicUrlData.publicUrl;
+  } catch (err) {
+    console.error('[STORAGE] Error uploading ledger photo proof:', err);
+    return '';
+  }
+};

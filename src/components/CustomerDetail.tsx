@@ -17,7 +17,8 @@ import {
   X,
   Edit3,
   CheckCircle2,
-  FileText
+  FileText,
+  FileImage
 } from 'lucide-react';
 
 import { formatShopCurrency } from '../lib/countryPricing';
@@ -430,6 +431,21 @@ export const CustomerDetail: React.FC<Props> = ({
                       {noteText && (
                         <div className="text-xs text-slate-600 dark:text-slate-300 font-medium pl-4 truncate">
                           📝 {noteText}
+                        </div>
+                      )}
+
+                      {tx.ledger_photo_url && (
+                        <div className="pl-4 pt-0.5">
+                          <a
+                            href={tx.ledger_photo_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center space-x-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded-md hover:underline"
+                          >
+                            <FileImage className="w-3 h-3" />
+                            <span>Ledger Proof</span>
+                          </a>
                         </div>
                       )}
 

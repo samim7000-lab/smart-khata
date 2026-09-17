@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import { formatShopCurrency } from '../lib/countryPricing';
+import { isFeatureEnabled } from '../lib/featureFlags';
 
 interface Props {
   shop: Shop;
@@ -27,6 +28,7 @@ interface Props {
   onSelectCustomer: (customer: Customer) => void;
   onOpenAddTx: () => void;
   onOpenScanLedger: () => void;
+  onOpenUpgrade?: () => void;
   onSelectReceiptTx: (tx: Transaction, customer: Customer) => void;
   onNavigateTab: (tab: 'customers' | 'history' | 'reports') => void;
 }
@@ -39,6 +41,7 @@ export const Dashboard: React.FC<Props> = ({
   onSelectCustomer,
   onOpenAddTx,
   onOpenScanLedger,
+  onOpenUpgrade,
   onSelectReceiptTx,
   onNavigateTab,
 }) => {
@@ -146,12 +149,21 @@ export const Dashboard: React.FC<Props> = ({
         </span>
         <div className="flex items-center space-x-2">
           <button
-            disabled={true}
-            className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 bg-slate-100 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400 font-extrabold text-xs rounded-xl shadow-none flex items-center justify-center space-x-1.5 cursor-not-allowed opacity-75 min-w-0"
-            title="AI Handwriting Scanner Coming Soon"
+            onClick={() => {
+              const isEntitled = isFeatureEnabled('ocr_scanner', shop?.plan_tier || 'free');
+              if (isEntitled) {
+                onOpenScanLedger();
+              } else if (onOpenUpgrade) {
+                onOpenUpgrade();
+              } else {
+                onOpenScanLedger();
+              }
+            }}
+            className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center justify-center space-x-1.5 transition-all active:scale-[0.98] min-w-0"
+            title={t.scan_ledger_title}
           >
-            <Camera className="w-4 h-4 text-slate-400 shrink-0" />
-            <span className="truncate">🚧 AI Scanner - Soon</span>
+            <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+            <span className="truncate">{t.scan_ledger_title}</span>
           </button>
 
           <button

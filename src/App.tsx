@@ -1421,6 +1421,7 @@ export const App: React.FC = () => {
                       setIsAddTxOpen(true);
                     }}
                     onOpenScanLedger={() => setIsScanLedgerOpen(true)}
+                    onOpenUpgrade={() => setLockedFeatureName('AI Handwriting Scanner')}
                     onSelectReceiptTx={(tx, cust) => setReceiptModalData({ tx, customer: cust })}
                     onNavigateTab={(t) => setActiveTab(t as any)}
                   />
