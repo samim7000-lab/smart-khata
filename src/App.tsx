@@ -707,6 +707,11 @@ export const App: React.FC = () => {
   };
 
   // P0 RECOVERY: Secure Merchant Self-Restore Handler
+  // ARCHITECTURAL INVARIANT: RESTORATION STRICTLY REQUIRES user_restore_own_shop RPC.
+  // Direct client-side database updates (bypassing the RPC) are strictly forbidden to ensure:
+  // 1. Cross-tenant isolation (server-side auth.uid() = owner_id check)
+  // 2. Active-shop uniqueness guarantee (prevents multi-active shop state via 23505 check)
+  // 3. Complete lifecycle state transition: deleted_at = NULL, deletion_status = 'ACTIVE', restore_available = FALSE
   const handleRestoreShop = async (targetShopId: string) => {
     if (!supabase || !activeUserId) return;
     console.log(`[SHOP-RECOVERY] Invoking user_restore_own_shop RPC for shop: ${targetShopId}`);
@@ -718,7 +723,9 @@ export const App: React.FC = () => {
 
       if (error) {
         console.error('[SHOP-RECOVERY] user_restore_own_shop RPC error:', error.message);
-        throw new Error(error.message);
+        const restoreErr: any = new Error(error.message);
+        restoreErr.code = error.code;
+        throw restoreErr;
       }
 
       console.log('[SHOP-RECOVERY] Shop restored successfully:', restored);

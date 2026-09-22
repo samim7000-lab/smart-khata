@@ -249,7 +249,8 @@ export type TranslationKey =
   | 'contact_saved_notice'
   | 'customer_phone_updated'
   | 'update_phone'
-  | 'enter_customer_phone';
+  | 'enter_customer_phone'
+  | 'shop_recovery_unavailable';
 
 export const translations: Record<Language, Record<TranslationKey, string>> = {
   en: {
@@ -502,6 +503,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     customer_phone_updated: 'Customer phone updated successfully!',
     update_phone: 'Update Phone Number',
     enter_customer_phone: 'Enter customer mobile number',
+    shop_recovery_unavailable: 'Shop recovery is temporarily unavailable. Please try again shortly.',
   },
   bn: {
     app_title: 'স্মার্ট খাতা',
@@ -753,6 +755,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     customer_phone_updated: 'কাস্টমারের ফোন নম্বর সফলভাবে আপডেট হয়েছে!',
     update_phone: 'ফোন নম্বর পরিবর্তন',
     enter_customer_phone: 'কাস্টমারের মোবাইল নম্বর লিখুন',
+    shop_recovery_unavailable: 'দোকান পুনরুদ্ধার সেবা সাময়িকভাবে অনুপলব্ধ। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।',
   },
   hi: {
     app_title: 'स्मार्ट खाता',
@@ -1004,5 +1007,6 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     customer_phone_updated: 'ग्राहक का फोन नंबर सफलतापूर्वक अपडेट किया गया!',
     update_phone: 'फोन नंबर बदलें',
     enter_customer_phone: 'ग्राहक का मोबाइल नंबर दर्ज करें',
+    shop_recovery_unavailable: 'दुकान पुनर्प्राप्ति सेवा अस्थायी रूप से अनुपलब्ध है। कृपया कुछ समय बाद पुनः प्रयास करें।',
   },
 };

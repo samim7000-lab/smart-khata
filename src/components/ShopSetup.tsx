@@ -84,7 +84,25 @@ export const ShopSetup: React.FC<Props> = ({
     try {
       await onRestoreShop(recoverableShop.id);
     } catch (err: any) {
-      setRestoreError(err?.message || 'Restore failed');
+      const errMsg = err?.message || '';
+      const isMissingRpc =
+        err?.code === 'PGRST202' ||
+        errMsg.includes('PGRST202') ||
+        errMsg.includes('schema cache') ||
+        errMsg.includes('user_restore_own_shop');
+
+      if (isMissingRpc) {
+        setRestoreError(t.shop_recovery_unavailable);
+      } else {
+        setRestoreError(
+          errMsg ||
+            (language === 'bn'
+              ? 'দোকান পুনরুদ্ধার সম্ভব হয়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+              : language === 'hi'
+              ? 'दुकान पुनर्स्थापित नहीं हो सकी। कृपया पुनः प्रयास करें।'
+              : 'Failed to restore shop. Please try again.')
+        );
+      }
       setIsRestoring(false);
     }
   };

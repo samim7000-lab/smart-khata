@@ -3,6 +3,11 @@
 // ====================================================
 
 import assert from 'assert';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 console.log('====================================================');
 console.log('🧪 SMART KHATA — SPRINT VERIFICATION TEST SUITE');
@@ -192,6 +197,42 @@ assert.throws(() => {
 }, /42501/);
 console.log('✅ PASS [10]: Restoration blocked when restore_available is false');
 
+// 11. Missing RPC (PGRST202) error mapping to friendly user-facing messages
+const mockTranslations = {
+  en: { shop_recovery_unavailable: 'Shop recovery is temporarily unavailable. Please try again shortly.' },
+  bn: { shop_recovery_unavailable: 'দোকান পুনরুদ্ধার সেবা সাময়িকভাবে অনুপলব্ধ। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।' },
+  hi: { shop_recovery_unavailable: 'दुकान पुनर्प्राप्ति सेवा अस्थायी रूप से अनुपलब्ध है। कृपया कुछ समय बाद पुनः प्रयास करें।' },
+};
+
+const mapRestoreError = (err, lang) => {
+  const errMsg = err?.message || '';
+  const isMissingRpc =
+    err?.code === 'PGRST202' ||
+    errMsg.includes('PGRST202') ||
+    errMsg.includes('schema cache') ||
+    errMsg.includes('user_restore_own_shop');
+  if (isMissingRpc) {
+    return mockTranslations[lang].shop_recovery_unavailable;
+  }
+  return errMsg || 'Restore failed';
+};
+
+const pgrstError = { code: 'PGRST202', message: 'Could not find the function public.user_restore_own_shop without parameters in the schema cache' };
+assert.strictEqual(mapRestoreError(pgrstError, 'en'), 'Shop recovery is temporarily unavailable. Please try again shortly.');
+assert.strictEqual(mapRestoreError(pgrstError, 'bn'), 'দোকান পুনরুদ্ধার সেবা সাময়িকভাবে অনুপলব্ধ। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।');
+assert.strictEqual(mapRestoreError(pgrstError, 'hi'), 'दुकान पुनर्प्राप्ति सेवा अस्थायी रूप से अनुपलब्ध है। कृपया कुछ समय बाद पुनः प्रयास करें।');
+console.log('✅ PASS [11]: Missing RPC (PGRST202) cleanly mapped to friendly user-facing messages across EN/BN/HI');
+
+// 12. Invariant verification: App.tsx restore handler contains NO direct database update fallback
+const appTsxContent = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf8');
+const restoreHandlerMatch = appTsxContent.match(/handleRestoreShop\s*=\s*async[\s\S]*?(?=\n\s*(?:\/\/\s*Load|const\s+load|useEffect))/);
+assert.ok(restoreHandlerMatch, 'handleRestoreShop must exist in App.tsx');
+const restoreHandlerBody = restoreHandlerMatch[0];
+assert.ok(!restoreHandlerBody.includes(".from('shops').update"), 'handleRestoreShop must NOT contain direct .from("shops").update fallback');
+assert.ok(!restoreHandlerBody.includes("is_deleted"), 'handleRestoreShop must NOT reference non-existent is_deleted column');
+assert.ok(restoreHandlerBody.includes("supabase.rpc('user_restore_own_shop'"), 'handleRestoreShop must strictly invoke user_restore_own_shop RPC');
+console.log('✅ PASS [12]: Architectural invariant confirmed: handleRestoreShop is strictly RPC-only with zero direct update fallback');
+
 // --- TEST GROUP 4: Secret Sanitization in Meta Cloud Service ---
 console.log('\n--- TEST GROUP 4: Secret Sanitization in Meta Cloud Service ---');
 
@@ -212,13 +253,13 @@ mockSaveConnection({
   access_token: 'EAABwzL_SECRET_META_GRAPH_ACCESS_TOKEN_12345',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
-});
+  });
 
 const storedJson = JSON.parse(testLocalStorage['smart_khata_wa_conn_shop-1']);
 assert.strictEqual(storedJson.access_token, undefined);
 assert.strictEqual(storedJson.phone_number_id, '123456789');
 assert.strictEqual(storedJson.status, 'CONNECTED');
-console.log('✅ PASS [11]: Plaintext Meta access_token is strictly redacted before localStorage persistence');
+console.log('✅ PASS [13]: Plaintext Meta access_token is strictly redacted before localStorage persistence');
 
 // --- TEST GROUP 5: Atomic Transaction Validation Invariants ---
 console.log('\n--- TEST GROUP 5: Atomic Transaction Validation Invariants ---');
@@ -242,7 +283,7 @@ const validateAtomicTxPayload = (shopId, customerId, type, amount, callerShopOwn
 // Valid transaction
 const validTx = validateAtomicTxPayload('s1', 'c1', 'credit_given', 500, 'authenticated-owner', 's1');
 assert.strictEqual(validTx.amount, 500);
-console.log('✅ PASS [12]: Valid atomic transaction payload passes all schema assertions');
+console.log('✅ PASS [14]: Valid atomic transaction payload passes all schema assertions');
 
 // Negative or zero amount rejected
 assert.throws(() => {
@@ -251,14 +292,14 @@ assert.throws(() => {
 assert.throws(() => {
   validateAtomicTxPayload('s1', 'c1', 'credit_given', -100, 'authenticated-owner', 's1');
 }, /22003/);
-console.log('✅ PASS [13]: Non-positive amount strictly rejected by atomic transaction validation');
+console.log('✅ PASS [15]: Non-positive amount strictly rejected by atomic transaction validation');
 
 // Mismatched customer rejected
 assert.throws(() => {
   validateAtomicTxPayload('s1', 'c1', 'credit_given', 500, 'authenticated-owner', 's2'); // Customer belongs to s2
 }, /P0002/);
-console.log('✅ PASS [14]: Cross-shop customer transaction strictly rejected with P0002');
+console.log('✅ PASS [16]: Cross-shop customer transaction strictly rejected with P0002');
 
 console.log('\n----------------------------------------------------');
-console.log('🎉 ALL 14/14 SPRINT VERIFICATION TESTS PASSED CLEANLY!');
+console.log('🎉 ALL 16/16 SPRINT VERIFICATION TESTS PASSED CLEANLY!');
 console.log('----------------------------------------------------');
