@@ -20,14 +20,24 @@ import {
   ArrowRight,
   ShieldCheck,
   FileCheck2,
-  FileText
+  FileText,
+  RotateCcw
 } from 'lucide-react';
+
+export interface RecoverableShopSummary {
+  id: string;
+  shop_name: string;
+  owner_name?: string;
+  deleted_at?: string;
+}
 
 interface Props {
   language: Language;
   initialShop?: Partial<Shop> | null;
   userEmail?: string | null;
   userName?: string | null;
+  recoverableShop?: RecoverableShopSummary | null;
+  onRestoreShop?: (shopId: string) => Promise<void>;
   onComplete: (shopData: Partial<Shop>) => void;
 }
 
@@ -36,6 +46,8 @@ export const ShopSetup: React.FC<Props> = ({
   initialShop,
   userEmail,
   userName,
+  recoverableShop,
+  onRestoreShop,
   onComplete,
 }) => {
   const t = translations[language];
@@ -62,6 +74,20 @@ export const ShopSetup: React.FC<Props> = ({
   const [phoneErrorMsg, setPhoneErrorMsg] = useState<string | null>(null);
   const [emailErrorMsg, setEmailErrorMsg] = useState<string | null>(null);
   const [gstErrorMsg, setGstErrorMsg] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  const handleTriggerRestore = async () => {
+    if (!recoverableShop || !onRestoreShop) return;
+    setIsRestoring(true);
+    setRestoreError(null);
+    try {
+      await onRestoreShop(recoverableShop.id);
+    } catch (err: any) {
+      setRestoreError(err?.message || 'Restore failed');
+      setIsRestoring(false);
+    }
+  };
 
   // Logo Upload Handler
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -192,6 +218,82 @@ export const ShopSetup: React.FC<Props> = ({
           <div className="p-4 bg-rose-50 dark:bg-rose-950/80 border-2 border-rose-300 dark:border-rose-800 rounded-2xl flex items-center space-x-3 text-rose-800 dark:text-rose-200 text-xs font-black shadow-md animate-in slide-in-from-top-2">
             <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
             <span>{gateErrorMsg}</span>
+          </div>
+        )}
+
+        {/* Recoverable Shop Recovery Banner */}
+        {recoverableShop && onRestoreShop && (
+          <div className="p-4 bg-gradient-to-r from-amber-500/15 to-orange-500/10 border-2 border-amber-500/40 rounded-3xl space-y-3 text-amber-200 shadow-lg animate-in slide-in-from-top-2">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h4 className="font-extrabold text-sm text-white">
+                    {language === 'bn'
+                      ? 'পূর্বে মুছে ফেলা দোকান পুনরুদ্ধার করুন'
+                      : language === 'hi'
+                      ? 'पहले हटाई गई दुकान वापस लाएं'
+                      : 'Restore Previous Shop'}
+                  </h4>
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {language === 'bn' ? 'উপলব্ধ' : language === 'hi' ? 'उपलब्ध' : 'Available'}
+                  </span>
+                </div>
+                <p className="text-xs text-amber-100/80 font-medium mt-1">
+                  {language === 'bn' ? (
+                    <>
+                      আপনার পূর্বে মুছে ফেলা দোকান <strong className="text-amber-300">"{recoverableShop.shop_name}"</strong> পুনরুদ্ধার করতে পারেন। আপনার সমস্ত গ্রাহক ও লেনদেনের হিসাব অবিকল ফিরে আসবে।
+                    </>
+                  ) : language === 'hi' ? (
+                    <>
+                      आप अपनी पहले हटाई गई दुकान <strong className="text-amber-300">"{recoverableShop.shop_name}"</strong> को पुनर्स्थापित कर सकते हैं। आपके सभी पुराने खाते सुरक्षित रहेंगे।
+                    </>
+                  ) : (
+                    <>
+                      You can restore your previously deleted shop <strong className="text-amber-300">"{recoverableShop.shop_name}"</strong>. All historical customers and transactions will be fully recovered.
+                    </>
+                  )}
+                </p>
+
+                {restoreError && (
+                  <p className="text-xs text-rose-400 font-bold mt-2">
+                    {restoreError}
+                  </p>
+                )}
+
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTriggerRestore}
+                    disabled={isRestoring}
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-md transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {isRestoring ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />
+                        <span>{language === 'bn' ? 'পুনরুদ্ধার হচ্ছে...' : 'Restoring...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-3.5 h-3.5 text-slate-950" />
+                        <span>
+                          {language === 'bn'
+                            ? `"${recoverableShop.shop_name}" পুনরুদ্ধার করুন`
+                            : language === 'hi'
+                            ? `"${recoverableShop.shop_name}" पुनर्स्थापित करें`
+                            : `Restore "${recoverableShop.shop_name}"`}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                  <span className="text-[11px] text-slate-400 font-bold">
+                    {language === 'bn' ? 'অথবা নিচে নতুন তৈরি করুন' : 'or create new below'}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

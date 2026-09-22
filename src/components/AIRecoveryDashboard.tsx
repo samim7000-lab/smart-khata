@@ -12,6 +12,7 @@ import { EntitlementService } from '../lib/entitlementEngine';
 import { EMIService, EMIAccountDB, EMIInstallmentDB } from '../lib/emiService';
 import { isValidUuid } from '../lib/uuidGuard';
 import { dispatchWhatsApp } from '../lib/whatsappService';
+import { executeRecoveryAdviceTask, RecoveryTone } from '../lib/aiTaskRouter';
 import { EMIForm } from './EMIForm';
 import { EMIAccountDetail } from './EMIAccountDetail';
 import {
@@ -28,7 +29,8 @@ import {
   Calendar,
   Layers,
   ShoppingBag,
-  Plus
+  Plus,
+  Loader2
 } from 'lucide-react';
 
 interface Props {
@@ -72,6 +74,9 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
   const [emiFilter, setEmiFilter] = useState<'all' | 'due_today' | 'overdue' | 'active' | 'completed'>('all');
   const [editingAnalysis, setEditingAnalysis] = useState<AIRecoveryAnalysis | null>(null);
   const [customMsgText, setCustomMsgText] = useState('');
+  const [selectedTone, setSelectedTone] = useState<RecoveryTone>('polite');
+  const [isGeneratingAi, setIsGeneratingAi] = useState<string | null>(null);
+  const [draftSource, setDraftSource] = useState<'ai' | 'deterministic_fallback' | null>(null);
   const [autoModeEnabled, setAutoModeEnabled] = useState(false);
 
   // EMI Creation & Inspection Modal State
@@ -201,6 +206,33 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
     // Log reminder sent timestamp for cooldown tracking
     recordReminderSent(analysis.customer.id);
     setEditingAnalysis(null);
+  };
+
+  const handleGenerateAiDraft = async (analysis: AIRecoveryAnalysis, tone: RecoveryTone = selectedTone) => {
+    setIsGeneratingAi(analysis.customer.id);
+    setSelectedTone(tone);
+    try {
+      const result = await executeRecoveryAdviceTask({
+        shopId: shop.id,
+        shopName: shop.shop_name,
+        country: shop.country,
+        currencyCode: shop.currency_code,
+        customerId: analysis.customer.id,
+        customerName: analysis.customer.display_label || analysis.customer.name,
+        balance: analysis.outstandingBalance,
+        oldestUnpaidDays: analysis.oldestUnpaidDays,
+        daysSinceLastPayment: analysis.daysSinceLastPayment,
+        language,
+        tone,
+      });
+
+      setCustomMsgText(result.suggestedMessage);
+      setDraftSource(result.source);
+    } catch (err) {
+      console.warn('[AI RECOVERY] Error generating AI draft:', err);
+    } finally {
+      setIsGeneratingAi(null);
+    }
   };
 
   const handleSendEmiWA = async (record: EMIRecord) => {
@@ -734,8 +766,66 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                       </button>
                     </div>
                   ) : (
-                    /* Inline Message Editor */
-                    <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                    /* Inline Message Editor with AI Assistance */
+                    <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+                      {/* AI Drafting Toolbar with Tone Selection */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-purple-50/70 dark:bg-purple-950/40 p-2.5 rounded-xl border border-purple-200 dark:border-purple-800">
+                        <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                          <span className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-300">
+                            {language === 'bn' ? 'টোন:' : 'Tone:'}
+                          </span>
+                          {(['polite', 'friendly', 'firm'] as const).map((tKey) => (
+                            <button
+                              key={tKey}
+                              type="button"
+                              onClick={() => {
+                                setSelectedTone(tKey);
+                                handleGenerateAiDraft(item, tKey);
+                              }}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all ${
+                                selectedTone === tKey
+                                  ? 'bg-purple-600 text-white shadow-xs'
+                                  : 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 hover:bg-purple-100'
+                              }`}
+                            >
+                              {tKey === 'polite'
+                                ? (language === 'bn' ? 'বিনম্র' : 'Polite')
+                                : tKey === 'friendly'
+                                ? (language === 'bn' ? 'বন্ধুসুলভ' : 'Friendly')
+                                : (language === 'bn' ? 'স্পষ্ট' : 'Firm')}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          {draftSource && (
+                            <span className="text-[10px] font-extrabold text-purple-700 dark:text-purple-300">
+                              {draftSource === 'ai'
+                                ? (language === 'bn' ? '✨ AI প্রস্তুতকৃত' : '✨ AI Generated')
+                                : (language === 'bn' ? '📋 টেমপ্লেট' : '📋 Template')}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            disabled={isGeneratingAi === item.customer.id}
+                            onClick={() => handleGenerateAiDraft(item, selectedTone)}
+                            className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-extrabold text-[11px] rounded-lg shadow-xs flex items-center space-x-1 transition-all"
+                          >
+                            {isGeneratingAi === item.customer.id ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <span>{language === 'bn' ? 'তৈরি হচ্ছে...' : 'Drafting...'}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-3 h-3" />
+                                <span>{language === 'bn' ? 'AI ড্রাফট তৈরি' : 'Draft with AI'}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
                       <textarea
                         rows={4}
                         value={customMsgText}
@@ -753,10 +843,10 @@ export const AIRecoveryDashboard: React.FC<Props> = ({
                         <button
                           type="button"
                           onClick={() => handleSendWA(item)}
-                          className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-extrabold rounded-lg flex items-center space-x-1 min-h-[44px]"
+                          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold rounded-lg flex items-center space-x-1 min-h-[44px] shadow-sm transition-all active:scale-95"
                         >
                           <Send className="w-3.5 h-3.5" />
-                          <span>💬 {language === 'bn' ? 'হোয়াটসঅ্যাপ পাঠাল' : 'Send WhatsApp'}</span>
+                          <span>💬 {language === 'bn' ? 'হোয়াটসঅ্যাপে পাঠান' : 'Send via WhatsApp'}</span>
                         </button>
                       </div>
                     </div>

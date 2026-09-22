@@ -19,13 +19,14 @@ import {
 
 import { formatShopCurrency } from '../lib/countryPricing';
 import { isFeatureEnabled } from '../lib/featureFlags';
-import { ScanWorkspaceService } from '../lib/scanWorkspaceService';
+import { ScanWorkspaceService, getCanonicalWorkspaceIdentity } from '../lib/scanWorkspaceService';
 
 interface Props {
   shop: Shop;
   customers: Customer[];
   transactions: Transaction[];
   language: Language;
+  activeUserId?: string | null;
   isPlanLoading?: boolean;
   onSelectCustomer: (customer: Customer) => void;
   onOpenAddTx: () => void;
@@ -40,6 +41,7 @@ export const Dashboard: React.FC<Props> = ({
   customers,
   transactions,
   language,
+  activeUserId,
   isPlanLoading = false,
   onSelectCustomer,
   onOpenAddTx,
@@ -83,8 +85,9 @@ export const Dashboard: React.FC<Props> = ({
 
   // Detect in-progress multi-scan batch for quick resume
   const activeBatch = useMemo(() => {
-    if (!shop?.id) return null;
-    const ws = ScanWorkspaceService.loadWorkspace(shop.id, shop?.owner_id);
+    const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
+    if (!identity.isValid) return null;
+    const ws = ScanWorkspaceService.loadWorkspace(identity.shopId, identity.userId);
     if (!ws || !ws.drafts || ws.drafts.length === 0) return null;
     const pendingCount = ws.drafts.filter((d) => d.saveStatus !== 'saved').length;
     if (pendingCount === 0) return null;
@@ -92,7 +95,7 @@ export const Dashboard: React.FC<Props> = ({
       total: ws.drafts.length,
       pending: pendingCount,
     };
-  }, [shop?.id, shop?.owner_id]);
+  }, [shop, activeUserId]);
 
   const filteredCustomers = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();

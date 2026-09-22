@@ -1,4 +1,4 @@
-import { PlanTier } from '../types';
+import type { PlanTier } from '../types/index.ts';
 
 export interface CountryPricingConfig {
   countryCode: string;

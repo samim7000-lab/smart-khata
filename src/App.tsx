@@ -29,7 +29,7 @@ import { AIRecoveryDashboard } from './components/AIRecoveryDashboard';
 import { SmartKhataLogo } from './components/SmartKhataLogo';
 import { PlanTier, ReceiptDetailsPayload } from './types';
 import { packReceiptNote } from './lib/receiptUtils';
-import { ScanWorkspaceService } from './lib/scanWorkspaceService';
+import { ScanWorkspaceService, getCanonicalWorkspaceIdentity } from './lib/scanWorkspaceService';
 import {
   isSupabaseConfigured,
   isDevAuth,
@@ -61,7 +61,12 @@ export const App: React.FC = () => {
 
   // Auth Session Initialization State (Prevents race conditions on Google OAuth redirect)
   const [isAuthInitializing, setIsAuthInitializing] = useState<boolean>(true);
+  const [isSessionRefreshing, setIsSessionRefreshing] = useState<boolean>(false);
   const [lastShopError, setLastShopError] = useState<string | null>(null);
+
+  // Synchronous refs to prevent stale closure in onAuthStateChange
+  const activeUserIdRef = useRef<string | null>(null);
+  const shopRef = useRef<Shop | null>(null);
 
   // Onboarding & App State (Single source of truth for language: localStorage -> 'bn')
   const [language, setLanguage] = useState<Language>(() => {
@@ -95,6 +100,15 @@ export const App: React.FC = () => {
     if (!savedLang) return 'language_select';
     return 'welcome';
   });
+
+  // Self-Serve Soft-Deleted Shop Recovery State
+  const [recoverableShop, setRecoverableShop] = useState<{
+    id: string;
+    shop_name: string;
+    owner_name?: string;
+    deleted_at?: string;
+  } | null>(null);
+  const [isRestoringShop, setIsRestoringShop] = useState(false);
 
   // Global Theme State ('light' | 'dark')
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -178,6 +192,7 @@ export const App: React.FC = () => {
   const [receiptModalData, setReceiptModalData] = useState<{
     tx: Transaction;
     customer: Customer;
+    returnContext?: 'scan_workspace' | 'normal_transaction';
   } | null>(null);
 
   // Phase G Enterprise Modals State
@@ -278,6 +293,15 @@ export const App: React.FC = () => {
     avatarUrl: localStorage.getItem('smart_khata_last_account_avatar'),
   });
 
+  // Synchronize refs for latest state access in async callbacks
+  useEffect(() => {
+    activeUserIdRef.current = activeUserId;
+  }, [activeUserId]);
+
+  useEffect(() => {
+    shopRef.current = shop;
+  }, [shop]);
+
   // Initial Auth Listener for Real Supabase Mode
   useEffect(() => {
     console.log(`[AUTH] Initializing App (isSupabaseConfigured: ${isSupabaseConfigured})`);
@@ -318,6 +342,7 @@ export const App: React.FC = () => {
             console.log(`[AUTH] user.id = ${session.user.id}`);
             saveGoogleMetadata(session.user);
             setActiveUserId(session.user.id);
+            activeUserIdRef.current = session.user.id;
             await fetchUserShop(session.user.id);
           } else {
             console.log('[AUTH] No active Supabase OAuth session found');
@@ -328,6 +353,7 @@ export const App: React.FC = () => {
                 if (devUser.id) {
                   console.log(`[AUTH] Restoring Development OTP user session: ${devUser.id}`);
                   setActiveUserId(devUser.id);
+                  activeUserIdRef.current = devUser.id;
                   await fetchUserShop(devUser.id);
                   setIsAuthInitializing(false);
                   return;
@@ -337,7 +363,9 @@ export const App: React.FC = () => {
               }
             }
             setActiveUserId(null);
+            activeUserIdRef.current = null;
             setShop(null);
+            shopRef.current = null;
             const savedLang = (localStorage.getItem('smart_khata_lang') as Language) || 'bn';
             setLanguage(savedLang);
             setScreen('language_select');
@@ -354,6 +382,7 @@ export const App: React.FC = () => {
           if (session?.user) {
             saveGoogleMetadata(session.user);
             setActiveUserId(session.user.id);
+            activeUserIdRef.current = session.user.id;
 
             if (event === 'INITIAL_SESSION') {
               console.log('[AUTH] INITIAL_SESSION handled without redundant query.');
@@ -366,6 +395,21 @@ export const App: React.FC = () => {
               return;
             }
 
+            // CRITICAL FIX: Distinguish cold boot from background resume/focus
+            // If user is already authenticated and shop is loaded, handle silently without unmounting UI
+            const currentUserId = activeUserIdRef.current;
+            const currentShop = shopRef.current;
+            if (currentUserId && currentShop && currentShop.owner_id === session.user.id) {
+              console.log('[AUTH] Background SIGNED_IN resume revalidation handled silently without destroying active UI.');
+              setIsSessionRefreshing(true);
+              try {
+                await fetchUserShop(session.user.id);
+              } finally {
+                setIsSessionRefreshing(false);
+              }
+              return;
+            }
+
             setIsAuthInitializing(true);
             await fetchUserShop(session.user.id);
             setIsAuthInitializing(false);
@@ -373,13 +417,16 @@ export const App: React.FC = () => {
             console.log('[AUTH] User signed out');
             ScanWorkspaceService.clearAllUserWorkspaces();
             setActiveUserId(null);
+            activeUserIdRef.current = null;
             setShop(null);
+            shopRef.current = null;
             setCustomers([]);
             setTransactions([]);
             const savedLang = (localStorage.getItem('smart_khata_lang') as Language) || 'bn';
             setLanguage(savedLang);
             setScreen('language_select');
             setIsAuthInitializing(false);
+            setIsSessionRefreshing(false);
           }
         });
 
@@ -599,6 +646,8 @@ export const App: React.FC = () => {
             const isComplete = isShopProfileComplete(dbShop);
             console.log(`[PROFILE] complete = ${isComplete}`);
 
+            setRecoverableShop(null);
+
             if (isComplete) {
               console.log('[ROUTE] Dashboard');
               setScreen('main');
@@ -608,14 +657,38 @@ export const App: React.FC = () => {
               setScreen('shop_setup');
             }
           } else {
-            console.log(`[SHOP] no shop found in DB for owner_id = ${userId}`);
+            console.log(`[SHOP] no active shop found in DB for owner_id = ${userId}`);
             console.log('[PROFILE] complete = false');
             console.log('[ROUTE] ShopSetup');
+
+            // P0 RECOVERY: Check if authenticated user owns a soft-deleted shop with restore_available=true
+            try {
+              const { data: recShops, error: recErr } = await supabase
+                .from('shops')
+                .select('id, shop_name, owner_name, deleted_at, restore_available')
+                .eq('owner_id', userId)
+                .not('deleted_at', 'is', null)
+                .eq('restore_available', true)
+                .order('deleted_at', { ascending: false })
+                .limit(1);
+
+              if (!recErr && recShops && recShops.length > 0) {
+                console.log(`[SHOP-RECOVERY] Recoverable soft-deleted shop found: ${recShops[0].shop_name} (${recShops[0].id})`);
+                setRecoverableShop(recShops[0]);
+              } else {
+                setRecoverableShop(null);
+              }
+            } catch (recCheckErr) {
+              console.warn('[SHOP-RECOVERY] Error checking recoverable shops:', recCheckErr);
+              setRecoverableShop(null);
+            }
+
             setShop(null);
             setScreen('shop_setup');
           }
         } catch (err) {
           console.error('[SHOP] Exception fetching user shop:', err);
+          setRecoverableShop(null);
           setShop(null);
           setScreen('shop_setup');
         }
@@ -630,6 +703,32 @@ export const App: React.FC = () => {
       }
     } finally {
       isFetchingShopRef.current = false;
+    }
+  };
+
+  // P0 RECOVERY: Secure Merchant Self-Restore Handler
+  const handleRestoreShop = async (targetShopId: string) => {
+    if (!supabase || !activeUserId) return;
+    console.log(`[SHOP-RECOVERY] Invoking user_restore_own_shop RPC for shop: ${targetShopId}`);
+    setIsRestoringShop(true);
+    try {
+      const { data: restored, error } = await supabase.rpc('user_restore_own_shop', {
+        target_shop_id: targetShopId,
+      });
+
+      if (error) {
+        console.error('[SHOP-RECOVERY] user_restore_own_shop RPC error:', error.message);
+        throw new Error(error.message);
+      }
+
+      console.log('[SHOP-RECOVERY] Shop restored successfully:', restored);
+      setRecoverableShop(null);
+      await fetchUserShop(activeUserId);
+    } catch (err: any) {
+      console.error('[SHOP-RECOVERY] Failed to restore shop:', err);
+      throw err;
+    } finally {
+      setIsRestoringShop(false);
     }
   };
 
@@ -967,9 +1066,10 @@ export const App: React.FC = () => {
     gstDetails?: any,
     ledgerPhotoUrl?: string,
     emiDetails?: EMIPayloadData,
-    receiptDetails?: ReceiptDetailsPayload
-  ) => {
-    if (!shop || isSavingTxRef.current) return;
+    receiptDetails?: ReceiptDetailsPayload,
+    returnContext: 'scan_workspace' | 'normal_transaction' = 'normal_transaction'
+  ): Promise<Transaction | null> => {
+    if (!shop || isSavingTxRef.current) return null;
     isSavingTxRef.current = true;
 
     try {
@@ -996,11 +1096,11 @@ export const App: React.FC = () => {
               activeShop = dbShop;
             } else {
               alert('Your shop account could not be resolved from database. Please sign in again.');
-              return;
+              return null;
             }
           } else {
             alert('Session expired. Please sign in again.');
-            return;
+            return null;
           }
         }
       }
@@ -1046,7 +1146,7 @@ export const App: React.FC = () => {
           } catch (err: any) {
             console.error('[UUID-GUARD] Customer insertion failed:', err);
             alert('Failed to save customer to database: ' + (err.message || err));
-            return;
+            return null;
           }
         } else {
           const newCust: Customer = {
@@ -1071,7 +1171,7 @@ export const App: React.FC = () => {
 
       if (!targetCustomer) {
         alert('Selected customer could not be resolved.');
-        return;
+        return null;
       }
 
       // Pre-flight assertion: finalCustId MUST be a valid UUID before sending to Supabase
@@ -1111,33 +1211,71 @@ export const App: React.FC = () => {
             txPayload.ledger_photo_url = ledgerPhotoUrl.trim();
           }
 
-          let { data, error } = await supabase
-            .from('transactions')
-            .insert(txPayload)
-            .select()
-            .single();
+          let data: any = null;
+          let error: any = null;
 
-          if (error && (error.message?.includes('schema cache') || error.message?.includes('column') || error.code === 'PGRST204')) {
-            console.warn('[DB-RETRY] Retrying transaction insertion with core schema payload...', error.message);
-            const corePayload: any = {
-              shop_id: activeShop.id,
-              customer_id: finalCustId,
-              type,
-              amount,
-              note: packedNote,
-            };
-            if (ledgerPhotoUrl && ledgerPhotoUrl.trim()) {
-              corePayload.ledger_photo_url = ledgerPhotoUrl.trim();
+          // P0 ATOMIC RPC ATTEMPT: Try atomic procedure first
+          let rpcSuccess = false;
+          try {
+            const { data: rpcTx, error: rpcErr } = await supabase.rpc('record_transaction_atomic', {
+              p_shop_id: activeShop.id,
+              p_customer_id: finalCustId,
+              p_type: type,
+              p_amount: amount,
+              p_note: packedNote,
+              p_ledger_photo_url: ledgerPhotoUrl?.trim() || null,
+              p_base_amount: txGstPayload.base_amount || null,
+              p_tax_amount: txGstPayload.tax_amount || null,
+              p_total_amount: txGstPayload.total_amount || null,
+              p_gst_rate: txGstPayload.gst_rate || 0,
+              p_cgst_amount: txGstPayload.cgst_amount || 0,
+              p_sgst_amount: txGstPayload.sgst_amount || 0,
+              p_igst_amount: txGstPayload.igst_amount || 0,
+            });
+
+            if (!rpcErr && rpcTx) {
+              data = rpcTx;
+              rpcSuccess = true;
+              console.log('[ATOMIC-TX] Transaction recorded atomically via record_transaction_atomic RPC. ID:', rpcTx.id);
+            } else if (rpcErr) {
+              console.warn('[ATOMIC-TX] record_transaction_atomic RPC unavailable or failed, falling back to direct insert:', rpcErr.message);
             }
+          } catch (rpcCallEx) {
+            console.warn('[ATOMIC-TX] Exception invoking record_transaction_atomic, falling back to direct insert:', rpcCallEx);
+          }
 
-            const retryResult = await supabase
+          if (!rpcSuccess) {
+            let insertRes = await supabase
               .from('transactions')
-              .insert(corePayload)
+              .insert(txPayload)
               .select()
               .single();
 
-            data = retryResult.data;
-            error = retryResult.error;
+            data = insertRes.data;
+            error = insertRes.error;
+
+            if (error && (error.message?.includes('schema cache') || error.message?.includes('column') || error.code === 'PGRST204')) {
+              console.warn('[DB-RETRY] Retrying transaction insertion with core schema payload...', error.message);
+              const corePayload: any = {
+                shop_id: activeShop.id,
+                customer_id: finalCustId,
+                type,
+                amount,
+                note: packedNote,
+              };
+              if (ledgerPhotoUrl && ledgerPhotoUrl.trim()) {
+                corePayload.ledger_photo_url = ledgerPhotoUrl.trim();
+              }
+
+              const retryResult = await supabase
+                .from('transactions')
+                .insert(corePayload)
+                .select()
+                .single();
+
+              data = retryResult.data;
+              error = retryResult.error;
+            }
           }
 
           if (error || !data) throw error || new Error('Transaction insertion failed');
@@ -1147,7 +1285,7 @@ export const App: React.FC = () => {
         } catch (err: any) {
           console.error('[UUID-GUARD] Supabase transaction insert error:', err);
           alert('Failed to save transaction: ' + (err.message || 'Unknown database error'));
-          return;
+          return null;
         }
       } else {
         const packedNote = packReceiptNote(note || '', receiptDetails);
@@ -1168,7 +1306,7 @@ export const App: React.FC = () => {
         saveMockTransactions(updatedTxs);
       }
 
-      if (!savedTx) return;
+      if (!savedTx) return null;
 
       // 3. Atomic EMI Account & Schedule Creation (If EMI mode)
       if (emiDetails && isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
@@ -1196,7 +1334,7 @@ export const App: React.FC = () => {
           // Rollback transaction to maintain strict database atomicity
           await supabase.from('transactions').delete().eq('id', savedTx.id);
           alert('Failed to set up EMI account: ' + emiRes.error);
-          return;
+          return null;
         }
 
         console.log(`[UUID-GUARD] EMI Account and Installment schedule created successfully! Account ID: ${emiRes.accountId}`);
@@ -1229,6 +1367,7 @@ export const App: React.FC = () => {
         setReceiptModalData({
           tx: savedTx,
           customer: updatedCust,
+          returnContext,
         });
       } else {
         const allCusts = customers.some((c) => c.id === targetCustomer?.id)
@@ -1251,10 +1390,12 @@ export const App: React.FC = () => {
         setReceiptModalData({
           tx: savedTx,
           customer: latestCustomerState,
+          returnContext,
         });
       }
 
       setIsAddTxOpen(false);
+      return savedTx;
     } finally {
       isSavingTxRef.current = false;
     }
@@ -1404,6 +1545,10 @@ export const App: React.FC = () => {
       {screen === 'shop_setup' && (
         <ShopSetup
           language={language}
+          recoverableShop={recoverableShop}
+          onRestoreShop={handleRestoreShop}
+          userEmail={authUserMeta.email}
+          userName={authUserMeta.name}
           onComplete={handleShopSetupComplete}
         />
       )}
@@ -1457,6 +1602,7 @@ export const App: React.FC = () => {
                     customers={customers}
                     transactions={transactions}
                     language={language}
+                    activeUserId={activeUserId}
                     isPlanLoading={isAuthInitializing}
                     onSelectCustomer={(c) => {
                       setSelectedCustomer(c);
@@ -1603,25 +1749,34 @@ export const App: React.FC = () => {
           shop={shop}
           customers={customers}
           language={language}
+          activeUserId={activeUserId}
           onClose={() => setIsScanLedgerOpen(false)}
-          onConfirmSave={(
+          onConfirmSave={async (
             finalCustId,
             type,
             amount,
             note,
             ledgerPhotoUrl,
-            newCustPayload
+            newCustPayload,
+            draftId
           ) => {
-            setIsScanLedgerOpen(false);
-            handleSaveTransaction(
+            const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
+            const savedTx = await handleSaveTransaction(
               finalCustId,
               type,
               amount,
               note,
               newCustPayload,
               undefined,
-              ledgerPhotoUrl
+              ledgerPhotoUrl,
+              undefined,
+              undefined,
+              'scan_workspace'
             );
+            if (savedTx?.id && draftId && identity.isValid) {
+              ScanWorkspaceService.markDraftSaved(draftId, savedTx.id, identity.shopId, identity.userId);
+            }
+            return savedTx;
           }}
         />
       )}
@@ -1634,13 +1789,12 @@ export const App: React.FC = () => {
           shop={shop}
           language={language}
           transactions={transactions}
+          returnContext={receiptModalData.returnContext}
           onClose={() => {
+            const isFromScanWorkspace = receiptModalData?.returnContext === 'scan_workspace';
             setReceiptModalData(null);
-            if (shop && ScanWorkspaceService.hasActiveWorkspace(shop.id, activeUserId || undefined)) {
-              const ws = ScanWorkspaceService.loadWorkspace(shop.id, activeUserId || undefined);
-              if (ws && ws.drafts.some((d) => d.saveStatus !== 'saved')) {
-                setIsScanLedgerOpen(true);
-              }
+            if (isFromScanWorkspace) {
+              setIsScanLedgerOpen(true);
             }
           }}
           onUpdateCustomer={(updated) => {

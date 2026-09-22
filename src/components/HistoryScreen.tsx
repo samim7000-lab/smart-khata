@@ -140,15 +140,25 @@ export const HistoryScreen: React.FC<Props> = ({
       {/* Filter Controls Bar */}
       <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
         {/* Search */}
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400" />
+        <div className="relative flex items-center">
+          <Search className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t.search_placeholder}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 rounded-xl border border-slate-200 text-sm font-semibold outline-none focus:bg-white focus:border-blue-600"
+            className="w-full pl-10 pr-10 py-2.5 bg-slate-50 hover:bg-slate-100/80 focus:bg-white text-slate-900 placeholder-slate-400 caret-blue-600 rounded-xl border border-slate-200 text-sm font-semibold outline-none focus:border-blue-600 transition-colors"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors"
+              aria-label="Clear search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Dropdown Filters Grid */}
@@ -161,7 +171,7 @@ export const HistoryScreen: React.FC<Props> = ({
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value as any)}
-              className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600"
+              className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white transition-colors"
             >
               <option value="all">{t.all_time}</option>
               <option value="today">{t.today}</option>
@@ -179,7 +189,7 @@ export const HistoryScreen: React.FC<Props> = ({
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as any)}
-              className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600"
+              className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white transition-colors"
             >
               <option value="all">{t.all}</option>
               <option value="credit_given">{t.credit_given}</option>
@@ -196,7 +206,7 @@ export const HistoryScreen: React.FC<Props> = ({
             <select
               value={selectedCustomerId}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600"
+              className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white transition-colors"
             >
               <option value="all">{t.all} ({customers.length})</option>
               {customers.map((c) => (
@@ -215,14 +225,14 @@ export const HistoryScreen: React.FC<Props> = ({
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="flex-1 px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-medium outline-none"
+              className="flex-1 px-3 py-2 bg-slate-50 text-slate-900 rounded-xl border border-slate-200 text-xs font-medium outline-none focus:border-blue-600 focus:bg-white"
             />
-            <span className="text-xs text-slate-400">to</span>
+            <span className="text-xs text-slate-400 font-semibold">to</span>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="flex-1 px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-medium outline-none"
+              className="flex-1 px-3 py-2 bg-slate-50 text-slate-900 rounded-xl border border-slate-200 text-xs font-medium outline-none focus:border-blue-600 focus:bg-white"
             />
           </div>
         )}

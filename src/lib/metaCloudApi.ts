@@ -136,7 +136,9 @@ export const MetaCloudApiService = {
     }
 
     try {
-      localStorage.setItem(`${STORAGE_KEY_WA_CONN}_${connection.shop_id}`, JSON.stringify(connection));
+      // SECURITY HARDENING: Never write plaintext Meta access_token into unencrypted client localStorage
+      const { access_token, ...safeConn } = connection as any;
+      localStorage.setItem(`${STORAGE_KEY_WA_CONN}_${connection.shop_id}`, JSON.stringify(safeConn));
     } catch {
       // Ignore
     }

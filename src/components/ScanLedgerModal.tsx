@@ -9,11 +9,16 @@ import {
   resolveCustomerIdentity,
   IdentityStatus,
 } from '../lib/customerIdentityResolver';
-import { captureNativePhoto } from '../native/nativeCamera';
+import {
+  captureNativePhoto,
+  recoverPendingNativePhoto,
+  clearPendingNativePhoto,
+} from '../native/nativeCamera';
 import {
   ScanWorkspaceService,
   ScanDraft,
   BadgeState,
+  getCanonicalWorkspaceIdentity,
 } from '../lib/scanWorkspaceService';
 import {
   Camera,
@@ -45,6 +50,7 @@ interface Props {
   shop: Shop;
   customers: Customer[];
   language: Language;
+  activeUserId?: string | null;
   onClose: () => void;
   onConfirmSave: (
     customerId: string,
@@ -52,7 +58,8 @@ interface Props {
     amount: number,
     note: string,
     ledgerPhotoUrl?: string,
-    newCustomerData?: { name: string; phone: string; displayLabel: string; address?: string }
+    newCustomerData?: { name: string; phone: string; displayLabel: string; address?: string },
+    draftId?: string
   ) => void;
 }
 
@@ -60,6 +67,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
   shop,
   customers,
   language,
+  activeUserId,
   onClose,
   onConfirmSave,
 }) => {
@@ -83,25 +91,63 @@ export const ScanLedgerModal: React.FC<Props> = ({
 
   // 1. Rehydrate active Scan Workspace from storage on mount (survives WhatsApp & App restart)
   useEffect(() => {
-    const existingWs = ScanWorkspaceService.loadWorkspace(shop.id, shop.owner_id);
+    const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
+    if (!identity.isValid) return;
+    const existingWs = ScanWorkspaceService.loadWorkspace(identity.shopId, identity.userId);
     if (existingWs && existingWs.drafts && existingWs.drafts.length > 0) {
       setDrafts(existingWs.drafts);
       setActiveDraftIndex(existingWs.activeDraftIndex || 0);
+      if (existingWs.stage === 'draft_review' && existingWs.currentDraftId) {
+        const foundIdx = existingWs.drafts.findIndex((d) => d.id === existingWs.currentDraftId);
+        if (foundIdx >= 0) {
+          setActiveDraftIndex(foundIdx);
+          setViewMode('detail');
+          return;
+        }
+      }
       if (existingWs.drafts.length > 1) {
         setViewMode('list');
       } else {
         setViewMode('detail');
       }
     }
-  }, [shop.id, shop.owner_id]);
+  }, [shop, activeUserId]);
+
+  // 1b. Recover completed native camera photo if Activity/Component was recreated during capture
+  useEffect(() => {
+    let isCancelled = false;
+    const checkPendingCamera = async () => {
+      const pendingMarker = ScanWorkspaceService.getPendingCameraCapture();
+      const nativeRes = await recoverPendingNativePhoto();
+      if (isCancelled) return;
+
+      if (nativeRes.hasPending && nativeRes.blob) {
+        console.log('[SCAN] Successfully recovered pending camera photo from native storage!');
+        ScanWorkspaceService.clearPendingCameraCapture();
+        await clearPendingNativePhoto();
+        await processSelectedFile(nativeRes.blob);
+      } else if (pendingMarker && Date.now() - pendingMarker.createdAt > 2 * 60 * 1000) {
+        ScanWorkspaceService.clearPendingCameraCapture();
+      }
+    };
+
+    checkPendingCamera();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   // 2. Automatically sync active workspace to local storage (24-hour TTL, zero base64)
   useEffect(() => {
+    const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
+    if (!identity.isValid) return;
     if (drafts.length > 0) {
       ScanWorkspaceService.saveWorkspace({
-        workspaceId: `ws-${shop.id}`,
-        shopId: shop.id,
-        userId: shop.owner_id,
+        workspaceId: `ws-${identity.shopId}`,
+        shopId: identity.shopId,
+        userId: identity.userId,
+        currentDraftId: drafts[activeDraftIndex]?.id,
+        stage: viewMode === 'list' ? 'batch_list' : 'draft_review',
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
         drafts,
@@ -109,7 +155,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
         status: drafts.every((d) => d.saveStatus === 'saved') ? 'completed' : 'in_progress',
       });
     }
-  }, [drafts, activeDraftIndex, shop.id, shop.owner_id]);
+  }, [drafts, activeDraftIndex, viewMode, shop, activeUserId]);
 
   // Helper: Initialize a draft card from OCR data using Canonical Identity Resolver
   const createDraftFromData = (
@@ -180,23 +226,40 @@ export const ScanLedgerModal: React.FC<Props> = ({
   // 1. Direct Camera Action (Native Camera with explicit URI permissions -> Web Fallback)
   const handleTakePhoto = async () => {
     setInputError(null);
+    const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
+    const captureRequestId = `cam_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    if (identity.isValid) {
+      ScanWorkspaceService.savePendingCameraCapture({
+        captureRequestId,
+        userId: identity.userId,
+        shopId: identity.shopId,
+      });
+    }
+
     try {
-      const nativeRes = await captureNativePhoto();
+      const nativeRes = await captureNativePhoto(captureRequestId);
       if (nativeRes.cancelled) {
+        ScanWorkspaceService.clearPendingCameraCapture();
+        await clearPendingNativePhoto();
         return;
       }
       if (nativeRes.blob) {
+        ScanWorkspaceService.clearPendingCameraCapture();
+        await clearPendingNativePhoto();
         await processSelectedFile(nativeRes.blob);
         return;
       }
       if (nativeRes.useWebFallback) {
+        ScanWorkspaceService.clearPendingCameraCapture();
         cameraInputRef.current?.click();
         return;
       }
       if (nativeRes.error) {
+        ScanWorkspaceService.clearPendingCameraCapture();
         setInputError(nativeRes.error);
       }
     } catch (err: any) {
+      ScanWorkspaceService.clearPendingCameraCapture();
       console.warn('[SCAN] Native camera error, falling back to web file input:', err);
       cameraInputRef.current?.click();
     }
@@ -380,6 +443,12 @@ export const ScanLedgerModal: React.FC<Props> = ({
     setDrafts([]);
     setActiveDraftIndex(0);
     setShowOptionalDetails(false);
+    const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
+    if (identity.isValid) {
+      ScanWorkspaceService.clearWorkspace(identity.shopId, identity.userId);
+    } else {
+      ScanWorkspaceService.clearWorkspace();
+    }
   };
 
   // Mandatory Validation Gate
@@ -451,13 +520,16 @@ export const ScanLedgerModal: React.FC<Props> = ({
         activeDraft.optionalNote?.trim(),
       ].filter(Boolean).join(' - ') || t.scan_ledger_title;
 
+      const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
+
       onConfirmSave(
         finalCustId,
         activeDraft.type,
         activeAmountParsed.amount,
         noteText,
         proofUrl || undefined,
-        newCustPayload
+        newCustPayload,
+        activeDraft.id
       );
 
       // Mark this draft as confirmed & saved
@@ -467,22 +539,24 @@ export const ScanLedgerModal: React.FC<Props> = ({
           : d
       );
       setDrafts(updatedDrafts);
-      ScanWorkspaceService.markDraftSaved(activeDraft.id);
+      if (identity.isValid) {
+        ScanWorkspaceService.markDraftSaved(activeDraft.id, undefined, identity.shopId, identity.userId);
+      }
 
       // Check if there are unconfirmed drafts remaining
       const remainingUnsaved = updatedDrafts.filter((d) => d.saveStatus !== 'saved');
       if (remainingUnsaved.length > 0 && drafts.length > 1) {
         // Return to batch list view so the merchant sees progress and selects next entry
         setViewMode('list');
-      } else if (remainingUnsaved.length === 0) {
-        ScanWorkspaceService.clearWorkspace();
-        onClose();
       } else {
-        ScanWorkspaceService.clearWorkspace();
+        if (identity.isValid) {
+          ScanWorkspaceService.clearWorkspace(identity.shopId, identity.userId);
+        }
         onClose();
       }
     } catch (err: any) {
       console.error('[SCAN] Confirm save error:', err);
+      const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
       const finalCustId = activeDraft.matchedCustomer?.id || `temp-${Date.now()}`;
       onConfirmSave(
         finalCustId,
@@ -497,9 +571,22 @@ export const ScanLedgerModal: React.FC<Props> = ({
               displayLabel: activeDraft.customerName.trim(),
               address: activeDraft.customerAddress?.trim() || undefined,
             }
-          : undefined
+          : undefined,
+        activeDraft.id
       );
       updateActiveDraft({ confirmed: true, saveStatus: 'saved' });
+      if (identity.isValid) {
+        ScanWorkspaceService.markDraftSaved(activeDraft.id, undefined, identity.shopId, identity.userId);
+      }
+      const remaining = drafts.filter((d, idx) => idx !== activeDraftIndex && d.saveStatus !== 'saved');
+      if (remaining.length > 0 && drafts.length > 1) {
+        setViewMode('list');
+      } else {
+        if (identity.isValid) {
+          ScanWorkspaceService.clearWorkspace(identity.shopId, identity.userId);
+        }
+        onClose();
+      }
     } finally {
       setUploading(false);
     }
@@ -553,7 +640,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
         {/* Modal Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
           {/* Step 1: Upload / Dropzone with DUAL Input Options */}
-          {!imagePreview && (
+          {!imagePreview && drafts.length === 0 && !analyzing && (
             <div className="space-y-4">
               <div className="bg-blue-50/60 dark:bg-slate-800/50 p-6 rounded-3xl border-2 border-dashed border-blue-200 dark:border-slate-700 text-center space-y-3">
                 <div className="w-16 h-16 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-blue-600/30">
@@ -682,16 +769,22 @@ export const ScanLedgerModal: React.FC<Props> = ({
           )}
 
           {/* Step 4A: Batch Overview List View (When viewMode === 'list' && drafts.length > 1) */}
-          {imagePreview && !analyzing && ocrResult && ocrResult.isValidLedger && !ocrResult.error && drafts.length > 1 && viewMode === 'list' && (
+          {!analyzing && drafts.length > 1 && viewMode === 'list' && (
             <div className="space-y-4 animate-in fade-in">
               {/* Photo Proof & Retake Bar */}
               <div className="flex items-center justify-between p-2.5 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
                 <div className="flex items-center space-x-3">
-                  <img
-                    src={imagePreview}
-                    alt="Ledger Proof"
-                    className="w-12 h-12 object-cover rounded-xl border border-slate-300 dark:border-slate-600"
-                  />
+                  {imagePreview ? (
+                    <img
+                      src={imagePreview}
+                      alt="Ledger Proof"
+                      className="w-12 h-12 object-cover rounded-xl border border-slate-300 dark:border-slate-600"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center border border-blue-200 dark:border-blue-700 shrink-0">
+                      <Layers className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                  )}
                   <div>
                     <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 flex items-center">
                       <Layers className="w-3.5 h-3.5 mr-1 text-blue-600 dark:text-blue-400" />
@@ -835,7 +928,12 @@ export const ScanLedgerModal: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    ScanWorkspaceService.clearWorkspace();
+                    const identity = getCanonicalWorkspaceIdentity(shop, activeUserId);
+                    if (identity.isValid) {
+                      ScanWorkspaceService.clearWorkspace(identity.shopId, identity.userId);
+                    } else {
+                      ScanWorkspaceService.clearWorkspace();
+                    }
                     onClose();
                   }}
                   className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl transition-colors"
@@ -862,7 +960,7 @@ export const ScanLedgerModal: React.FC<Props> = ({
           )}
 
           {/* Step 4B: Extracted Data Review & Confirmation (Detail Mode) */}
-          {imagePreview && !analyzing && ocrResult && ocrResult.isValidLedger && !ocrResult.error && activeDraft && (viewMode === 'detail' || drafts.length === 1) && (
+          {!analyzing && activeDraft && drafts.length > 0 && (viewMode === 'detail' || drafts.length === 1) && (
             <div className="space-y-4 animate-in fade-in">
               {/* Back to list button if multi-draft */}
               {drafts.length > 1 && (
@@ -884,11 +982,17 @@ export const ScanLedgerModal: React.FC<Props> = ({
               {/* Photo Proof & Retake Bar */}
               <div className="flex items-center justify-between p-2.5 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
                 <div className="flex items-center space-x-3">
-                  <img
-                    src={imagePreview}
-                    alt="Ledger Proof"
-                    className="w-12 h-12 object-cover rounded-xl border border-slate-300 dark:border-slate-600"
-                  />
+                  {imagePreview ? (
+                    <img
+                      src={imagePreview}
+                      alt="Ledger Proof"
+                      className="w-12 h-12 object-cover rounded-xl border border-slate-300 dark:border-slate-600"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center border border-blue-200 dark:border-blue-700 shrink-0">
+                      <FileImage className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                  )}
                   <div>
                     <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 flex items-center">
                       <FileImage className="w-3.5 h-3.5 mr-1 text-blue-600 dark:text-blue-400" />

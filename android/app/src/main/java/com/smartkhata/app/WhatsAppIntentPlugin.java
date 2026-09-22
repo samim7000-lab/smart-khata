@@ -19,6 +19,7 @@ import android.util.Base64;
 import android.util.Log;
 
 import android.content.ClipData;
+import android.content.SharedPreferences;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 
@@ -431,11 +432,17 @@ public class WhatsAppIntentPlugin extends Plugin {
     private Uri currentCameraPhotoUri = null;
     private File currentCameraPhotoFile = null;
 
+    private static final String PREF_CAMERA = "smart_khata_camera_prefs";
+    private static final String KEY_PENDING_REQ_ID = "pending_request_id";
+    private static final String KEY_PENDING_FILE_PATH = "pending_file_path";
+    private static final String KEY_PENDING_STATUS = "pending_status";
+    private static final String KEY_CAPTURED_DATA_URL = "captured_data_url";
+    private static final String KEY_CREATED_AT = "created_at";
+
     /**
      * NATIVE ANDROID CAMERA CAPTURE
-     * Bypasses fragile WebView file chooser by directly launching MediaStore.ACTION_IMAGE_CAPTURE
-     * with explicit FileProvider URI permission grants (including setClipData and grantUriPermission).
-     * Zero runtime permissions required.
+     * Launches MediaStore.ACTION_IMAGE_CAPTURE with explicit FileProvider permissions.
+     * Persists request metadata into SharedPreferences to survive Activity recreation.
      */
     @PluginMethod
     public void capturePhoto(PluginCall call) {
@@ -451,6 +458,8 @@ public class WhatsAppIntentPlugin extends Plugin {
             call.reject("No camera application available on this device");
             return;
         }
+
+        String captureRequestId = call.getString("captureRequestId", "cam_" + System.currentTimeMillis());
 
         try {
             String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
@@ -469,6 +478,16 @@ public class WhatsAppIntentPlugin extends Plugin {
             takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, currentCameraPhotoUri);
             takePictureIntent.setClipData(ClipData.newRawUri("", currentCameraPhotoUri));
             takePictureIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            // Persist capture intent in SharedPreferences so Activity recreation does not lose file path
+            SharedPreferences prefs = context.getSharedPreferences(PREF_CAMERA, Context.MODE_PRIVATE);
+            prefs.edit()
+                .putString(KEY_PENDING_REQ_ID, captureRequestId)
+                .putString(KEY_PENDING_FILE_PATH, currentCameraPhotoFile.getAbsolutePath())
+                .putString(KEY_PENDING_STATUS, "pending")
+                .putLong(KEY_CREATED_AT, System.currentTimeMillis())
+                .remove(KEY_CAPTURED_DATA_URL)
+                .apply();
 
             // Explicitly grant URI permission to all packages that can handle ACTION_IMAGE_CAPTURE
             List<ResolveInfo> resInfoList = activity.getPackageManager().queryIntentActivities(
@@ -493,38 +512,118 @@ public class WhatsAppIntentPlugin extends Plugin {
 
     @ActivityCallback
     public void processCameraResult(PluginCall call, ActivityResult result) {
-        if (call == null) return;
+        Context context = getContext();
+        SharedPreferences prefs = context != null ? context.getSharedPreferences(PREF_CAMERA, Context.MODE_PRIVATE) : null;
 
         if (result.getResultCode() == Activity.RESULT_OK) {
             try {
+                // Recover file reference from persistent SharedPreferences if in-memory field was cleared
+                if (currentCameraPhotoFile == null && prefs != null) {
+                    String savedPath = prefs.getString(KEY_PENDING_FILE_PATH, null);
+                    if (savedPath != null) {
+                        currentCameraPhotoFile = new File(savedPath);
+                    }
+                }
+
                 if (currentCameraPhotoFile != null && currentCameraPhotoFile.exists() && currentCameraPhotoFile.length() > 0) {
                     byte[] buffer = new byte[(int) currentCameraPhotoFile.length()];
                     try (FileInputStream fis = new FileInputStream(currentCameraPhotoFile)) {
                         int read = fis.read(buffer);
                         if (read <= 0) {
-                            call.reject("Captured image file was empty");
+                            if (call != null) call.reject("Captured image file was empty");
                             return;
                         }
                     }
                     String base64Image = Base64.encodeToString(buffer, Base64.NO_WRAP);
-                    JSObject res = new JSObject();
-                    res.put("success", true);
-                    res.put("format", "jpeg");
-                    res.put("dataUrl", "data:image/jpeg;base64," + base64Image);
-                    call.resolve(res);
+                    String dataUrl = "data:image/jpeg;base64," + base64Image;
+
+                    String reqId = prefs != null ? prefs.getString(KEY_PENDING_REQ_ID, "") : "";
+
+                    // Persist completed result in SharedPreferences BEFORE resolving call
+                    if (prefs != null) {
+                        prefs.edit()
+                            .putString(KEY_PENDING_STATUS, "captured")
+                            .putString(KEY_CAPTURED_DATA_URL, dataUrl)
+                            .apply();
+                    }
+
+                    if (call != null) {
+                        JSObject res = new JSObject();
+                        res.put("success", true);
+                        res.put("format", "jpeg");
+                        res.put("captureRequestId", reqId);
+                        res.put("dataUrl", dataUrl);
+                        call.resolve(res);
+                    }
                 } else {
-                    call.reject("Captured image file was empty or missing");
+                    if (call != null) call.reject("Captured image file was empty or missing");
                 }
             } catch (Exception ex) {
                 Log.e(TAG, "Failed to read captured camera image", ex);
-                call.reject("Failed to read captured image: " + ex.getMessage());
+                if (call != null) call.reject("Failed to read captured image: " + ex.getMessage());
             }
         } else {
             // User cancelled or exited camera
+            if (prefs != null) {
+                prefs.edit().clear().apply();
+            }
+            if (call != null) {
+                JSObject res = new JSObject();
+                res.put("success", false);
+                res.put("cancelled", true);
+                call.resolve(res);
+            }
+        }
+    }
+
+    /**
+     * RECOVERY METHOD FOR REACT / WEBVIEW REMOUNT
+     * If the Activity or React component unmounted during Camera execution,
+     * this allows JavaScript to claim the completed capture upon remount.
+     * Enforces strict ONE-TIME consumption.
+     */
+    @PluginMethod
+    public void getPendingCapturedPhoto(PluginCall call) {
+        Context context = getContext();
+        if (context == null) {
+            call.reject("Context is null");
+            return;
+        }
+
+        SharedPreferences prefs = context.getSharedPreferences(PREF_CAMERA, Context.MODE_PRIVATE);
+        String status = prefs.getString(KEY_PENDING_STATUS, "");
+        String dataUrl = prefs.getString(KEY_CAPTURED_DATA_URL, "");
+        String reqId = prefs.getString(KEY_PENDING_REQ_ID, "");
+        long createdAt = prefs.getLong(KEY_CREATED_AT, 0);
+
+        // Valid if captured within last 5 minutes
+        if ("captured".equals(status) && dataUrl != null && !dataUrl.isEmpty() && (System.currentTimeMillis() - createdAt < 300000)) {
+            // Strictly consume: Clear preferences immediately to prevent double processing
+            prefs.edit().clear().apply();
+
             JSObject res = new JSObject();
-            res.put("success", false);
-            res.put("cancelled", true);
+            res.put("success", true);
+            res.put("hasPending", true);
+            res.put("captureRequestId", reqId);
+            res.put("format", "jpeg");
+            res.put("dataUrl", dataUrl);
+            call.resolve(res);
+        } else {
+            JSObject res = new JSObject();
+            res.put("success", true);
+            res.put("hasPending", false);
             call.resolve(res);
         }
+    }
+
+    @PluginMethod
+    public void clearPendingCapturedPhoto(PluginCall call) {
+        Context context = getContext();
+        if (context != null) {
+            context.getSharedPreferences(PREF_CAMERA, Context.MODE_PRIVATE).edit().clear().apply();
+        }
+        JSObject res = new JSObject();
+        res.put("success", true);
+        call.resolve(res);
     }
 }

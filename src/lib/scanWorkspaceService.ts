@@ -16,13 +16,21 @@
  *    Opening wa.me is strictly 'handed_off', NEVER falsely recorded as 'sent'.
  */
 
-import { Customer, TransactionType } from '../types';
-import { GeminiOcrItem } from './geminiUtils';
-import { IdentityStatus } from './customerIdentityResolver';
+import type { Customer, TransactionType } from '../types/index.ts';
+import type { IdentityStatus } from './customerIdentityResolver.ts';
+
+export interface GeminiOcrItem {
+  name: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+}
 
 export type BadgeState = 'detected' | 'check' | 'manual';
 
 export type WhatsAppStatus = 'ready' | 'handed_off' | 'sent' | 'failed';
+
+export type ScanWorkspaceStage = 'idle' | 'capturing' | 'processing' | 'batch_list' | 'draft_review';
 
 export interface ScanDraft {
   id: string;
@@ -55,7 +63,9 @@ export interface ScanDraft {
 export interface ScanWorkspace {
   workspaceId: string;
   shopId: string;
-  userId?: string;
+  userId: string;
+  currentDraftId?: string;
+  stage?: ScanWorkspaceStage;
   createdAt: string;
   lastUpdatedAt: string;
   drafts: ScanDraft[];
@@ -63,17 +73,106 @@ export interface ScanWorkspace {
   status: 'in_progress' | 'completed' | 'abandoned';
 }
 
+export interface WorkspaceIdentity {
+  isValid: boolean;
+  userId: string;
+  shopId: string;
+}
+
+/**
+ * CANONICAL WORKSPACE IDENTITY RESOLVER
+ * Strict Security Invariant: authenticated user must be the shop owner.
+ * Never defaults to 'anon', 'default', or another user's workspace.
+ */
+export function getCanonicalWorkspaceIdentity(
+  shop: { id?: string; owner_id?: string } | null | undefined,
+  authenticatedUserId: string | null | undefined
+): WorkspaceIdentity {
+  if (!shop?.id || !authenticatedUserId) {
+    return { isValid: false, userId: '', shopId: '' };
+  }
+  if (shop.owner_id !== authenticatedUserId) {
+    console.warn('[WORKSPACE SECURITY] Tenant invariant violation: shop.owner_id !== authenticatedUserId');
+    return { isValid: false, userId: '', shopId: '' };
+  }
+  return { isValid: true, userId: authenticatedUserId, shopId: shop.id };
+}
+
+export interface PendingCameraCapture {
+  captureRequestId: string;
+  workspaceId?: string;
+  userId: string;
+  shopId: string;
+  createdAt: number;
+  status: 'pending' | 'captured' | 'consumed';
+}
+
+const PENDING_CAMERA_STORAGE_KEY = 'smart_khata_pending_camera_capture';
+
 const WORKSPACE_KEY_PREFIX = 'smart_khata_scan_workspace_';
 const LEGACY_STORAGE_KEY = 'smart_khata_scan_workspace_v1';
 const WORKSPACE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export class ScanWorkspaceService {
   /**
-   * Generates a tenant-scoped storage key combining userId and shopId.
+   * Records a pending camera capture request before launching the native camera.
    */
-  public static getStorageKey(shopId: string, userId?: string): string {
-    const cleanUser = userId ? userId.replace(/[^a-zA-Z0-9_-]/g, '') : 'default';
-    const cleanShop = shopId ? shopId.replace(/[^a-zA-Z0-9_-]/g, '') : 'unknown';
+  public static savePendingCameraCapture(capture: {
+    captureRequestId: string;
+    workspaceId?: string;
+    userId: string;
+    shopId: string;
+  }): void {
+    try {
+      if (!capture.captureRequestId || !capture.userId || !capture.shopId) return;
+      const record: PendingCameraCapture = {
+        ...capture,
+        createdAt: Date.now(),
+        status: 'pending',
+      };
+      localStorage.setItem(PENDING_CAMERA_STORAGE_KEY, JSON.stringify(record));
+    } catch (e) {
+      console.warn('[SCAN-WORKSPACE] Error saving pending camera capture:', e);
+    }
+  }
+
+  /**
+   * Reads an active pending camera capture if not expired (5-minute TTL).
+   */
+  public static getPendingCameraCapture(): PendingCameraCapture | null {
+    try {
+      const raw = localStorage.getItem(PENDING_CAMERA_STORAGE_KEY);
+      if (!raw) return null;
+      const record: PendingCameraCapture = JSON.parse(raw);
+      if (Date.now() - record.createdAt > 5 * 60 * 1000) {
+        localStorage.removeItem(PENDING_CAMERA_STORAGE_KEY);
+        return null;
+      }
+      return record;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Clears the pending camera capture marker after successful handoff or cancellation.
+   */
+  public static clearPendingCameraCapture(): void {
+    try {
+      localStorage.removeItem(PENDING_CAMERA_STORAGE_KEY);
+    } catch (e) {
+      console.warn('[SCAN-WORKSPACE] Error clearing pending camera capture:', e);
+    }
+  }
+
+  /**
+   * Generates a tenant-scoped storage key strictly combining authenticated userId and shopId.
+   */
+  public static getStorageKey(shopId: string, userId: string): string {
+    if (!shopId || !userId) return '';
+    const cleanUser = userId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const cleanShop = shopId.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!cleanUser || !cleanShop) return '';
     return `${WORKSPACE_KEY_PREFIX}${cleanUser}_${cleanShop}`;
   }
 
@@ -87,7 +186,13 @@ export class ScanWorkspaceService {
         return;
       }
 
+      if (!workspace.shopId || !workspace.userId) {
+        console.warn('[SCAN-WORKSPACE] Missing required shopId or userId for saving workspace');
+        return;
+      }
+
       const key = this.getStorageKey(workspace.shopId, workspace.userId);
+      if (!key) return;
 
       // Check if all drafts are saved; if so, immediately purge completed workspace
       const allSaved = workspace.drafts.every((d) => d.saveStatus === 'saved');
@@ -102,6 +207,8 @@ export class ScanWorkspaceService {
         workspaceId: workspace.workspaceId,
         shopId: workspace.shopId,
         userId: workspace.userId,
+        currentDraftId: workspace.currentDraftId,
+        stage: workspace.stage || 'batch_list',
         createdAt: workspace.createdAt || new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
         drafts: workspace.drafts.map((d) => ({
@@ -122,11 +229,13 @@ export class ScanWorkspaceService {
   /**
    * Loads the active scan workspace for a specific shop and user, enforcing TTL and isolation.
    */
-  public static loadWorkspace(shopId: string, userId?: string): ScanWorkspace | null {
+  public static loadWorkspace(shopId: string, userId: string): ScanWorkspace | null {
     try {
-      if (!shopId) return null;
+      if (!shopId || !userId) return null;
 
       const key = this.getStorageKey(shopId, userId);
+      if (!key) return null;
+
       let raw = localStorage.getItem(key);
 
       // Legacy migration fallback if new key is absent
@@ -238,9 +347,9 @@ export class ScanWorkspaceService {
    */
   public static clearWorkspace(shopId?: string, userId?: string): void {
     try {
-      if (shopId) {
+      if (shopId && userId) {
         const key = this.getStorageKey(shopId, userId);
-        localStorage.removeItem(key);
+        if (key) localStorage.removeItem(key);
       }
       localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch (e) {
@@ -279,7 +388,8 @@ export class ScanWorkspaceService {
   /**
    * Checks if an active uncompleted workspace exists for a shop and user.
    */
-  public static hasActiveWorkspace(shopId: string, userId?: string): boolean {
+  public static hasActiveWorkspace(shopId: string, userId: string): boolean {
+    if (!shopId || !userId) return false;
     const ws = this.loadWorkspace(shopId, userId);
     return Boolean(ws && ws.drafts.some((d) => d.saveStatus !== 'saved'));
   }
@@ -296,8 +406,9 @@ export class ScanWorkspaceService {
   ): void {
     // If specific shopId provided, inspect that key first
     const candidateKeys: string[] = [];
-    if (shopId) {
-      candidateKeys.push(this.getStorageKey(shopId, userId));
+    if (shopId && userId) {
+      const targetKey = this.getStorageKey(shopId, userId);
+      if (targetKey) candidateKeys.push(targetKey);
     }
     // Also scan any active workspace keys if not found
     for (let i = 0; i < localStorage.length; i++) {

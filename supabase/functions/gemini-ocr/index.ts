@@ -68,11 +68,14 @@ serve(async (req) => {
     let imageBase64 = '';
     let mimeType = 'image/jpeg';
     let shopId = '';
+    let task = 'ocr';
+    let requestBody: any = {};
     try {
-      const body = await req.json();
-      imageBase64 = body.imageBase64 || '';
-      mimeType = body.mimeType || 'image/jpeg';
-      shopId = body.shopId || '';
+      requestBody = await req.json();
+      task = requestBody.task || 'ocr';
+      imageBase64 = requestBody.imageBase64 || '';
+      mimeType = requestBody.mimeType || 'image/jpeg';
+      shopId = requestBody.shopId || '';
     } catch (bodyErr: any) {
       console.error('[EDGE OCR ERROR] Failed to parse request JSON payload:', bodyErr);
       return new Response(
@@ -86,7 +89,7 @@ serve(async (req) => {
       );
     }
 
-    if (!imageBase64) {
+    if (task === 'ocr' && !imageBase64) {
       return new Response(
         JSON.stringify({
           is_valid_ledger: false,
@@ -200,6 +203,144 @@ serve(async (req) => {
     console.log(`[EDGE OCR] Initializing @google/genai SDK request with model: ${activeModelIdentifier}`);
     
     const ai = new GoogleGenAI({ apiKey: apiKey });
+
+    // 5A. TASK ROUTE: FINANCIAL RECOVERY FOLLOW-UP DRAFTING
+    if (task === 'recovery_advice') {
+      const customerName = requestBody.customerName || 'Customer';
+      const balance = requestBody.balance || 0;
+      const currency = requestBody.currency || 'INR';
+      const daysOverdue = requestBody.daysOverdue || 0;
+      const lang = requestBody.language || 'bn';
+      const tone = requestBody.tone || 'polite';
+      const shopName = requestBody.shopName || 'Smart Khata Shop';
+
+      const prompt = `You are a respectful, culturally aware financial assistant for local retail merchants in South Asia (India/Bangladesh).
+Generate a concise, polite follow-up reminder message and an explanation for a customer with an overdue ledger balance.
+
+Rules:
+1. Language: ${lang === 'bn' ? 'Bengali (বাংলা)' : lang === 'hi' ? 'Hindi (हिंदी)' : 'English'}.
+2. Tone: ${tone} (Options: polite, friendly, firm).
+3. Do not invent facts. Use these exact details:
+   - Merchant Shop Name: "${shopName}"
+   - Customer Name: "${customerName}"
+   - Overdue Balance: "${currency} ${balance}"
+   - Days Overdue: ${daysOverdue} days
+4. Message should be ready for WhatsApp. It must be respectful, concise (2-3 sentences), and include NO religious bias.
+5. Return strictly a valid JSON object in this exact schema:
+{
+  "explanation": "1-sentence business explanation for the merchant in ${lang === 'bn' ? 'Bengali' : lang === 'hi' ? 'Hindi' : 'English'}",
+  "suggestedMessage": "Respectful WhatsApp message text ready to send"
+}`;
+
+      const textModel = Deno.env.get('GEMINI_TEXT_MODEL')?.trim() || 'gemini-2.5-flash';
+      try {
+        const response = await ai.models.generateContent({
+          model: textModel,
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.3,
+          },
+        });
+
+        const rawText = response.text?.trim() || '';
+        let parsedJson: any = {};
+        try {
+          const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+          parsedJson = JSON.parse(cleaned);
+        } catch (err) {
+          console.warn('[EDGE RECOVERY] Failed to parse JSON from model output:', err);
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            explanation: parsedJson.explanation || `Overdue balance of ${currency} ${balance} for ${daysOverdue} days.`,
+            suggestedMessage: parsedJson.suggestedMessage || `Dear ${customerName}, greetings from ${shopName}. Your outstanding balance is ${currency} ${balance}. Please settle when convenient. Thank you!`,
+            modelUsed: textModel,
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (genErr: any) {
+        console.error('[EDGE RECOVERY ERROR] Gemini generation failed:', genErr);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: genErr.message || 'Failed to generate recovery advice',
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // 5B. TASK ROUTE: MARKETING CAMPAIGN BROADCAST DRAFTING
+    if (task === 'campaign_draft') {
+      const shopName = requestBody.shopName || 'Smart Khata Shop';
+      const goal = requestBody.goal || 'new_product';
+      const audience = requestBody.audience || 'all';
+      const lang = requestBody.language || 'bn';
+      const tone = requestBody.tone || 'warm';
+      const customOffer = requestBody.customOffer || '';
+
+      const prompt = `You are a marketing specialist for local retail shops in South Asia.
+Create an engaging, respectful WhatsApp promotional broadcast draft for a local merchant's customers.
+
+Details:
+- Shop Name: "${shopName}"
+- Campaign Category / Goal: "${goal}"
+- Target Audience: "${audience}"
+- Tone: "${tone}"
+- Language: ${lang === 'bn' ? 'Bengali (বাংলা)' : lang === 'hi' ? 'Hindi (हिंदी)' : 'English'}
+${customOffer ? `- Custom Offer / Item: "${customOffer}"` : ''}
+
+Rules:
+1. Message MUST be completely religion-neutral (NO Eid, Puja, Christmas, Diwali, or religious references unless specifically in custom offer).
+2. Use variables like {{customer_name}} where appropriate.
+3. Keep it brief (3-4 sentences max), friendly, and attractive for WhatsApp.
+4. Return strictly a valid JSON object in this exact schema:
+{
+  "suggestedMessage": "WhatsApp message draft"
+}`;
+
+      const textModel = Deno.env.get('GEMINI_TEXT_MODEL')?.trim() || 'gemini-2.5-flash';
+      try {
+        const response = await ai.models.generateContent({
+          model: textModel,
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.4,
+          },
+        });
+
+        const rawText = response.text?.trim() || '';
+        let parsedJson: any = {};
+        try {
+          const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+          parsedJson = JSON.parse(cleaned);
+        } catch (err) {
+          console.warn('[EDGE CAMPAIGN] Failed to parse JSON from model output:', err);
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            suggestedMessage: parsedJson.suggestedMessage || `Dear {{customer_name}}, special greetings from ${shopName}! Visit us today for exciting offers. Thank you!`,
+            modelUsed: textModel,
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (genErr: any) {
+        console.error('[EDGE CAMPAIGN ERROR] Gemini generation failed:', genErr);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: genErr.message || 'Failed to generate campaign draft',
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
 
     // Clean base64 string if data URL prefix exists
     let cleanBase64 = imageBase64;

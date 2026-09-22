@@ -43,6 +43,7 @@ interface Props {
   shop: Shop;
   language: Language;
   transactions?: Transaction[];
+  returnContext?: 'scan_workspace' | 'normal_transaction';
   onClose: () => void;
   onUpdateCustomer?: (updated: Customer) => void;
 }
@@ -53,6 +54,7 @@ export const ReceiptModal: React.FC<Props> = ({
   shop,
   language,
   transactions = [],
+  returnContext,
   onClose,
   onUpdateCustomer,
 }) => {
@@ -243,15 +245,15 @@ export const ReceiptModal: React.FC<Props> = ({
       setToastMsg(res.statusMessage);
       if (transaction.id) {
         if (res.action === 'meta_cloud_sent') {
-          ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'sent', shop.id);
+          ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'sent', shop.id, shop.owner_id);
         } else {
           // Direct wa.me deep link opened: semantically handed_off, NOT confirmed sent
-          ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'handed_off', shop.id);
+          ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'handed_off', shop.id, shop.owner_id);
         }
       }
     } else {
       if (transaction.id) {
-        ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'failed', shop.id);
+        ScanWorkspaceService.markDraftWhatsAppStatus(transaction.id, 'failed', shop.id, shop.owner_id);
       }
       setToastMsg('⚠️ ' + (res.statusMessage || 'Failed to open WhatsApp'));
     }
@@ -327,7 +329,7 @@ export const ReceiptModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
       <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden my-auto animate-in zoom-in-95 duration-200 border border-slate-200">
         {/* Modal Header */}
         <div className="bg-slate-900 text-white p-4 flex items-center justify-between print:hidden border-b border-slate-800">

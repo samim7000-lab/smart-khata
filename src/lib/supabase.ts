@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Customer, Shop, Transaction } from '../types';
+import type { Customer, Shop, Transaction } from '../types/index.ts';
 
 const cleanUrl = (import.meta.env?.VITE_SUPABASE_URL || '').trim();
 const cleanKey = (import.meta.env?.VITE_SUPABASE_ANON_KEY || '').trim();
@@ -14,8 +14,51 @@ export const isSupabaseConfigured = Boolean(
   cleanKey.length > 20
 );
 
-export const authMode = import.meta.env?.VITE_AUTH_MODE || (import.meta.env?.VITE_DEV_MODE === 'false' ? 'production' : 'development');
-export const isDevAuth = authMode === 'development';
+export type AuthMode = 'development' | 'production' | 'invalid';
+
+export interface AuthModeConfig {
+  mode: 'development' | 'production';
+  rawMode: string;
+  isExplicitDev: boolean;
+  isMalformed: boolean;
+}
+
+export const resolveAuthMode = (rawInput?: string): AuthModeConfig => {
+  const normalized = (rawInput || '').trim().toLowerCase();
+
+  if (normalized === 'development') {
+    return { mode: 'development', rawMode: normalized, isExplicitDev: true, isMalformed: false };
+  }
+
+  if (normalized === 'production') {
+    return { mode: 'production', rawMode: normalized, isExplicitDev: false, isMalformed: false };
+  }
+
+  if (!normalized) {
+    const isLocalViteDev = import.meta.env?.DEV === true && import.meta.env?.VITE_DEV_MODE !== 'false';
+    return {
+      mode: isLocalViteDev ? 'development' : 'production',
+      rawMode: '',
+      isExplicitDev: isLocalViteDev,
+      isMalformed: false,
+    };
+  }
+
+  // Malformed / unknown value (e.g. 'devpmentelo'): FAIL CLOSED to 'production' for safety
+  console.warn(
+    `[AUTH-SAFETY] Unrecognized VITE_AUTH_MODE="${rawInput}". Failing closed to "production" mode to prevent unauthorized dev bypass.`
+  );
+  return {
+    mode: 'production',
+    rawMode: normalized,
+    isExplicitDev: false,
+    isMalformed: true,
+  };
+};
+
+const resolvedAuth = resolveAuthMode(import.meta.env?.VITE_AUTH_MODE);
+export const authMode = resolvedAuth.mode;
+export const isDevAuth = resolvedAuth.isExplicitDev;
 export const isDevMode = isDevAuth;
 
 export const supabase = isSupabaseConfigured
