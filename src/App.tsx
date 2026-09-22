@@ -54,6 +54,13 @@ const isValidUuid = (id?: string | null): boolean => {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 };
 
+const generateUuid = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `00000000-0000-4000-a000-${Date.now().toString().padStart(12, '0').slice(-12)}`;
+};
+
 export const App: React.FC = () => {
   // Guard to prevent concurrent/duplicate transaction saves
   const isSavingTxRef = React.useRef(false);
@@ -257,7 +264,7 @@ export const App: React.FC = () => {
     }
 
     const newShop: Shop = {
-      id: `shop-${Date.now()}`,
+      id: generateUuid(),
       owner_id: activeUserId || 'owner-1',
       shop_name: shopName,
       owner_name: ownerName,
@@ -742,7 +749,7 @@ export const App: React.FC = () => {
   // Load Customers & Transactions when shop changes
   useEffect(() => {
     if (shop) {
-      if (isSupabaseConfigured && supabase) {
+      if (isSupabaseConfigured && supabase && isValidUuid(shop.id)) {
         loadSupabaseData(shop.id);
       } else {
         loadMockData();
@@ -751,7 +758,7 @@ export const App: React.FC = () => {
   }, [shop?.id]);
 
   const loadSupabaseData = async (shopId: string) => {
-    if (!supabase) return;
+    if (!supabase || !isValidUuid(shopId)) return;
     try {
       console.log(`[REAL AUTH TEST] Querying Supabase DB records for shop_id: ${shopId}`);
       const { data: custData, error: custErr } = await supabase
@@ -998,7 +1005,7 @@ export const App: React.FC = () => {
     }
 
     const createdShop: Shop = {
-      id: `shop-${Date.now()}`,
+      id: generateUuid(),
       owner_id: activeUserId || '00000000-0000-4000-a000-017000000000',
       shop_name: newShopData.shop_name || 'My Shop',
       owner_name: newShopData.owner_name || 'Owner',

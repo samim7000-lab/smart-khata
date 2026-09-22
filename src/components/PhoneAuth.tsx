@@ -17,8 +17,8 @@ import {
   CheckCircle2
 } from 'lucide-react';
 
-// Feature Flag: Temporarily disable Mobile OTP until SMS Gateway integration
-const PHONE_OTP_ENABLED = false;
+// Feature Flag: Enable Phone OTP in development auth mode; temporarily disabled in production until SMS Gateway integration
+const PHONE_OTP_ENABLED = isDevAuth;
 
 interface Props {
   language: Language;
