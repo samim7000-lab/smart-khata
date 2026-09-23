@@ -29,6 +29,7 @@ import { AIRecoveryDashboard } from './components/AIRecoveryDashboard';
 import { SmartKhataLogo } from './components/SmartKhataLogo';
 import { PlanTier, ReceiptDetailsPayload } from './types';
 import { packReceiptNote } from './lib/receiptUtils';
+import { allocateInvoiceNumber, persistInvoiceRecord, getFinancialYear } from './lib/gstInvoiceEngine';
 import { ScanWorkspaceService, getCanonicalWorkspaceIdentity } from './lib/scanWorkspaceService';
 import {
   isSupabaseConfigured,
@@ -1076,7 +1077,7 @@ export const App: React.FC = () => {
     type: TransactionType,
     amount: number,
     note: string,
-    newCustomerData?: { name: string; phone: string; displayLabel: string; state?: string; address?: string; gstin?: string },
+    newCustomerData?: { name: string; phone: string; displayLabel: string; state?: string; address?: string; gstin?: string; credit_limit?: number },
     gstDetails?: any,
     ledgerPhotoUrl?: string,
     emiDetails?: EMIPayloadData,
@@ -1124,7 +1125,7 @@ export const App: React.FC = () => {
       let finalCustId = customerId;
       let targetCustomer: Customer | undefined;
 
-      // 1. Handle Inline Customer Creation (Guarantees DB Real UUID)
+      // 1. Handle Inline Customer Creation (Guarantees DB Real UUID + Schema Resilience)
       if (newCustomerData || customerId.startsWith('temp-')) {
         if (isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {
           try {
@@ -1145,18 +1146,55 @@ export const App: React.FC = () => {
             if (newCustomerData?.address && newCustomerData.address.trim()) {
               custPayload.address = newCustomerData.address.trim();
             }
+            if (newCustomerData?.credit_limit !== undefined) {
+              custPayload.credit_limit = Number(newCustomerData.credit_limit) || 0;
+            }
+            if (newCustomerData?.gstin && newCustomerData.gstin.trim()) {
+              custPayload.gstin = newCustomerData.gstin.trim().toUpperCase();
+            }
 
-            const { data, error } = await supabase
+            let { data, error } = await supabase
               .from('customers')
               .insert(custPayload)
               .select()
               .single();
+
+            // RESILIENCE FALLBACK FOR MISSING COLUMNS IN REMOTE SCHEMA CACHE (PGRST204)
+            if (error && (error.code === 'PGRST204' || (error.message && (error.message.includes('column') || error.message.includes('schema cache'))))) {
+              console.warn('[CUSTOMER-FALLBACK] Column missing in remote schema cache (PGRST204). Retrying with core schema columns:', error.message);
+              const corePayload = {
+                shop_id: activeShop.id,
+                name: custName,
+                phone_number: custPhone,
+                display_label: custLabel,
+              };
+              const retryRes = await supabase
+                .from('customers')
+                .insert(corePayload)
+                .select()
+                .single();
+
+              if (retryRes.data) {
+                data = {
+                  ...retryRes.data,
+                  address: custPayload.address,
+                  state: custPayload.state,
+                  credit_limit: custPayload.credit_limit,
+                  gstin: custPayload.gstin,
+                };
+                error = null;
+              } else {
+                error = retryRes.error;
+              }
+            }
 
             if (error || !data) throw error || new Error('Customer insertion failed');
 
             console.log(`[UUID-GUARD] Customer inserted successfully. DB Real UUID: ${data.id}`);
             finalCustId = data.id;
             targetCustomer = data;
+            // Immediately sync with local customers state
+            setCustomers((prev) => [data, ...prev.filter((c) => c.id !== data.id)]);
           } catch (err: any) {
             console.error('[UUID-GUARD] Customer insertion failed:', err);
             alert('Failed to save customer to database: ' + (err.message || err));
@@ -1193,7 +1231,22 @@ export const App: React.FC = () => {
         assertValidUuid(finalCustId, 'customer_id');
       }
 
-      // 2. Save Transaction into public.transactions
+      // 2. Prepare Sequential Invoice Number if GST enabled
+      const isGstTx = Boolean(receiptDetails?.gst_enabled || activeShop.gst_enabled);
+      let allocatedInvNumber: string | undefined;
+      const fyResult = getFinancialYear();
+
+      if (isGstTx) {
+        allocatedInvNumber = await allocateInvoiceNumber(activeShop, fyResult, activeShop.invoice_series || 'INV');
+        if (receiptDetails) {
+          receiptDetails.invoice_number = allocatedInvNumber;
+          receiptDetails.receipt_number = allocatedInvNumber;
+          receiptDetails.financial_year = fyResult.full;
+          receiptDetails.invoice_series = activeShop.invoice_series || 'INV';
+        }
+      }
+
+      // 2b. Save Transaction into public.transactions
       let savedTx: Transaction | null = null;
       const txGstPayload = gstDetails
         ? {
@@ -1321,6 +1374,42 @@ export const App: React.FC = () => {
       }
 
       if (!savedTx) return null;
+
+      // Asynchronously persist structured invoice record
+      if (isGstTx && allocatedInvNumber && receiptDetails && targetCustomer) {
+        persistInvoiceRecord({
+          shop_id: activeShop.id,
+          customer_id: finalCustId,
+          transaction_id: savedTx.id,
+          document_type: receiptDetails.document_type || 'tax_invoice',
+          financial_year: fyResult.full,
+          invoice_series: activeShop.invoice_series || 'INV',
+          invoice_number: allocatedInvNumber,
+          supply_type: receiptDetails.supply_type || 'intra',
+          place_of_supply: receiptDetails.place_of_supply,
+          reverse_charge: false,
+          supplier_legal_name: activeShop.legal_name || activeShop.shop_name,
+          supplier_address: activeShop.full_address,
+          supplier_gstin: activeShop.gst_number,
+          supplier_state: activeShop.state,
+          supplier_state_code: activeShop.state_code,
+          recipient_name: targetCustomer.display_label || targetCustomer.name,
+          recipient_address: receiptDetails.customer_address || targetCustomer.address,
+          recipient_gstin: receiptDetails.customer_gstin || targetCustomer.gstin,
+          recipient_state: targetCustomer.state,
+          recipient_state_code: receiptDetails.customer_state_code,
+          taxable_amount: receiptDetails.taxable_amount || 0,
+          cgst_amount: receiptDetails.cgst_amount || 0,
+          sgst_amount: receiptDetails.sgst_amount || 0,
+          igst_amount: receiptDetails.igst_amount || 0,
+          total_tax_amount: receiptDetails.total_tax_amount || 0,
+          discount_amount: receiptDetails.discount_amount || 0,
+          grand_total: amount,
+          items: receiptDetails.items || [],
+          notes: note,
+          status: 'issued',
+        }).catch((e) => console.warn('[INVOICE-PERSIST] Background invoice persist notice:', e));
+      }
 
       // 3. Atomic EMI Account & Schedule Creation (If EMI mode)
       if (emiDetails && isSupabaseConfigured && supabase && isValidUuid(activeShop.id)) {

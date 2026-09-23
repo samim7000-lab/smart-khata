@@ -163,8 +163,19 @@ export const ReceiptModal: React.FC<Props> = ({
   const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && transaction.tax_amount && transaction.tax_amount > 0));
   const gstPriceMode = details?.gst_price_mode || transaction.gst_price_mode || 'exclusive';
 
-  // Receipt / Invoice Number
-  const receiptNumber = details?.receipt_number || `INV-${transaction.id.replace(/\D/g, '').slice(-6) || Date.now().toString().slice(-6)}`;
+  // Receipt / Invoice Number & Document Type
+  const invoiceNumber = details?.invoice_number || details?.receipt_number || `INV-${transaction.id.replace(/\D/g, '').slice(-6) || Date.now().toString().slice(-6)}`;
+  const receiptNumber = invoiceNumber;
+
+  const documentType = details?.document_type || (
+    isPurePayment
+      ? (shop.gst_enabled ? 'payment_receipt' : 'receipt')
+      : shop.gst_enabled
+        ? (shop.gst_registration_type === 'composition' ? 'bill_of_supply' : 'tax_invoice')
+        : 'receipt'
+  );
+
+  const hasHsnSac = Boolean(lineItems.some((item) => Boolean(item.hsn_sac)));
 
   // Shop Address & Customer Address display formatting (Omitted if empty - Requirement #12)
   const shopAddressStr = shop.full_address || [shop.city, shop.state, shop.postal_code].filter(Boolean).join(', ');
@@ -402,6 +413,32 @@ export const ReceiptModal: React.FC<Props> = ({
                 </span>
               )}
             </div>
+
+            {/* DOCUMENT TYPE BADGE & STATUTORY DECLARATION */}
+            {shop.gst_enabled && (
+              <div className="pt-2 flex flex-col items-center gap-1">
+                {documentType === 'tax_invoice' && (
+                  <span className="px-3 py-1 rounded-full text-xs font-black tracking-widest uppercase bg-blue-100 text-blue-800 border border-blue-200 shadow-xs">
+                    TAX INVOICE
+                  </span>
+                )}
+                {documentType === 'bill_of_supply' && (
+                  <>
+                    <span className="px-3 py-1 rounded-full text-xs font-black tracking-widest uppercase bg-purple-100 text-purple-800 border border-purple-200 shadow-xs">
+                      BILL OF SUPPLY
+                    </span>
+                    <p className="text-[10px] text-purple-900 font-bold italic tracking-tight bg-purple-50 px-2.5 py-0.5 rounded border border-purple-200 text-center">
+                      Composition taxable person, not eligible to collect tax on supplies
+                    </p>
+                  </>
+                )}
+                {documentType === 'payment_receipt' && (
+                  <span className="px-3 py-1 rounded-full text-xs font-black tracking-widest uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-xs">
+                    PAYMENT RECEIPT
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* INVOICE META & CUSTOMER DETAILS ORDER */}
@@ -422,6 +459,11 @@ export const ReceiptModal: React.FC<Props> = ({
                     </span>
                     {customerAddressStr}
                   </span>
+                </div>
+              )}
+              {(details?.customer_state || customer.state) && (
+                <div className="text-slate-600 font-medium text-[11px]">
+                  <span className="font-bold text-slate-700">State: </span>{details?.customer_state || customer.state}
                 </div>
               )}
               {activeCustomer.phone_number ? (
@@ -449,14 +491,26 @@ export const ReceiptModal: React.FC<Props> = ({
             {/* Right Column: Invoice Meta */}
             <div className="text-right space-y-1 divide-y divide-slate-100">
               <div className="pb-1">
-                <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Receipt No</div>
-                <div className="font-mono font-black text-blue-600 text-sm">{receiptNumber}</div>
+                <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                  {shop.gst_enabled && documentType === 'tax_invoice'
+                    ? 'Tax Invoice No'
+                    : shop.gst_enabled && documentType === 'bill_of_supply'
+                    ? 'Bill of Supply No'
+                    : 'Receipt No'}
+                </div>
+                <div className="font-mono font-black text-blue-600 text-sm">{invoiceNumber}</div>
               </div>
               <div className="pt-1">
                 <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Date & Time</div>
                 <div className="font-semibold text-slate-700">{dateFormatted}</div>
                 <div className="text-[11px] text-slate-500">{timeFormatted}</div>
               </div>
+              {details?.place_of_supply && (
+                <div className="pt-1">
+                  <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Place of Supply</div>
+                  <div className="text-[11px] font-bold text-slate-700">{details.place_of_supply}</div>
+                </div>
+              )}
               {details?.payment_method && (
                 <div className="pt-1">
                   <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Payment Method</div>
@@ -471,14 +525,18 @@ export const ReceiptModal: React.FC<Props> = ({
           {/* ITEM DETAILS TABLE (Only rendered if NOT pure payment received!) */}
           {!isPurePayment && lineItems.length > 0 && (
             <div className="space-y-2">
-              <div className="text-xs font-black uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-1">
-                Itemized Invoice Summary
+              <div className="text-xs font-black uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-1 flex justify-between items-center">
+                <span>Itemized Invoice Summary</span>
+                {hasHsnSac && (
+                  <span className="text-[10px] text-slate-400 font-semibold normal-case">HSN/SAC Included</span>
+                )}
               </div>
 
               <table className="w-full text-xs text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-300 bg-slate-100 text-slate-700 font-black uppercase text-[10px]">
                     <th className="py-2 px-2">Item Description</th>
+                    {hasHsnSac && <th className="py-2 px-2 text-center">HSN/SAC</th>}
                     <th className="py-2 px-2 text-center">Qty</th>
                     <th className="py-2 px-2 text-right">Unit Price</th>
                     <th className="py-2 px-2 text-right">Amount</th>
@@ -488,6 +546,7 @@ export const ReceiptModal: React.FC<Props> = ({
                   {lineItems.map((item, idx) => (
                     <tr key={item.id || idx}>
                       <td className="py-2 px-2 font-bold">{item.name}</td>
+                      {hasHsnSac && <td className="py-2 px-2 text-center font-mono text-[10px] text-slate-500">{item.hsn_sac || '-'}</td>}
                       <td className="py-2 px-2 text-center text-slate-600">{item.quantity}</td>
                       <td className="py-2 px-2 text-right text-slate-600">{fmt(item.unit_price)}</td>
                       <td className="py-2 px-2 text-right font-bold text-slate-900">{fmt(item.total)}</td>
@@ -514,8 +573,8 @@ export const ReceiptModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* Requirement #5 & #12: Omit GST section if GST disabled */}
-              {hasGst && (
+              {/* Requirement #5 & #12: Omit GST section if GST disabled or Bill of Supply */}
+              {hasGst && documentType !== 'bill_of_supply' && (
                 <>
                   <div className="flex justify-between text-slate-700 font-semibold pt-1 border-t border-slate-200/60">
                     <span>Taxable Base Amount:</span>
@@ -548,6 +607,14 @@ export const ReceiptModal: React.FC<Props> = ({
                     )}
                   </div>
                 </>
+              )}
+
+              {/* Composition scheme notice in breakdown */}
+              {hasGst && documentType === 'bill_of_supply' && (
+                <div className="bg-purple-50 p-2.5 rounded-xl text-purple-900 border border-purple-100 text-[11px] font-semibold flex justify-between">
+                  <span>Composition Scheme:</span>
+                  <span>Tax Rate 0% (Tax not collected)</span>
+                </div>
               )}
 
               <div className="flex justify-between items-center pt-2 border-t border-slate-300">

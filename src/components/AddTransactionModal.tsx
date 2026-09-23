@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Customer, Language, Shop, TransactionType, ReceiptItem, DiscountType, GstPriceMode, ReceiptDetailsPayload } from '../types';
+import { Customer, Language, Shop, TransactionType, ReceiptItem, DiscountType, GstPriceMode, ReceiptDetailsPayload, GstDocumentType } from '../types';
 import { translations } from '../i18n/translations';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { calculateGst, ALLOWED_GST_RATES, GstCalculationResult } from '../lib/gstUtils';
+import { getStateCode, getStateCodeFromGstin, resolveDocumentType, COMPOSITION_STATUTORY_DECLARATION } from '../lib/gstInvoiceEngine';
 import { formatShopCurrency, resolveCurrencySymbol } from '../lib/countryPricing';
 import { validatePhoneNumber } from '../lib/phoneValidation';
 import { getCountryByCode } from '../data/countries';
@@ -97,6 +98,7 @@ export const AddTransactionModal: React.FC<Props> = ({
   // Form Fields & Line Items State
   const [items, setItems] = useState<ReceiptItem[]>([]);
   const [itemNameInput, setItemNameInput] = useState('');
+  const [itemHsnInput, setItemHsnInput] = useState('');
   const [itemQtyInput, setItemQtyInput] = useState('1');
   const [itemUnitPriceInput, setItemUnitPriceInput] = useState('');
 
@@ -214,6 +216,7 @@ export const AddTransactionModal: React.FC<Props> = ({
     const newItem: ReceiptItem = {
       id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: itemNameInput.trim(),
+      hsn_sac: itemHsnInput.trim() || undefined,
       quantity: qty,
       unit_price: unitPrice,
       total,
@@ -221,6 +224,7 @@ export const AddTransactionModal: React.FC<Props> = ({
 
     setItems((prev) => [...prev, newItem]);
     setItemNameInput('');
+    setItemHsnInput('');
     setItemQtyInput('1');
     setItemUnitPriceInput('');
   };
@@ -251,13 +255,21 @@ export const AddTransactionModal: React.FC<Props> = ({
   // Final selling price after discount
   const finalSellingPrice = Math.max(0, rawSubtotal - discountAmount);
 
-  // GST-Inclusive Calculation Engine
+  // GST Calculation Engine & Intra/Inter Auto-detection
+  const isComposition = shop.gst_registration_type === 'composition';
+  const supplierStateCode = shop.state_code || getStateCode(shop.state) || '';
+  const customerGstinCode = getStateCodeFromGstin(customerGstin);
+  const recipientStateCode = customerGstinCode || getStateCode(customerState || selectedCustomer?.state) || supplierStateCode;
+  const isInterState = Boolean(supplierStateCode && recipientStateCode && supplierStateCode !== recipientStateCode);
+
+  const effectiveGstRate = isComposition ? 0 : gstRate;
+
   const gstCalc = calculateGst(
     finalSellingPrice,
-    gstRate,
-    isGstEnabled,
-    shop.state,
-    customerState || selectedCustomer?.state,
+    effectiveGstRate,
+    isGstEnabled && !isComposition,
+    supplierStateCode,
+    recipientStateCode,
     gstPriceMode
   );
 
@@ -325,7 +337,7 @@ export const AddTransactionModal: React.FC<Props> = ({
         name: selectedCustomer.name,
         phone: selectedCustomer.phone_number,
         displayLabel: selectedCustomer.display_label,
-        state: selectedCustomer.state,
+        state: customerState.trim() || selectedCustomer.state || undefined,
         address: customerAddress.trim() || undefined,
         gstin: customerGstin.trim() || undefined,
       };
@@ -341,6 +353,10 @@ export const AddTransactionModal: React.FC<Props> = ({
       start_date: emiFirstDueDate,
       notes: note.trim(),
     } : undefined;
+
+    const docType: GstDocumentType = isGstEnabled
+      ? (txMode === 'due_payment' ? 'payment_receipt' : (isComposition ? 'bill_of_supply' : 'tax_invoice'))
+      : 'receipt';
 
     const receiptDetails: ReceiptDetailsPayload = {
       mode: txMode,
@@ -366,7 +382,19 @@ export const AddTransactionModal: React.FC<Props> = ({
       gst_enabled: isGstEnabled,
       customer_address: customerAddress.trim() || undefined,
       customer_gstin: customerGstin.trim() || undefined,
+      customer_state_code: recipientStateCode,
       notes: note.trim() || undefined,
+      document_type: docType,
+      is_composition: isComposition,
+      statutory_notice: isComposition ? COMPOSITION_STATUTORY_DECLARATION : undefined,
+      supplier_legal_name: shop.legal_name || shop.shop_name,
+      supplier_gstin: shop.gst_number,
+      supplier_state_code: supplierStateCode,
+      supply_type: isInterState ? 'inter' : 'intra',
+      cgst_amount: isGstEnabled && !isComposition && !isInterState ? gstCalc.cgstAmount : 0,
+      sgst_amount: isGstEnabled && !isComposition && !isInterState ? gstCalc.sgstAmount : 0,
+      igst_amount: isGstEnabled && !isComposition && isInterState ? gstCalc.igstAmount : 0,
+      total_tax_amount: isGstEnabled && !isComposition ? gstCalc.taxAmount : 0,
       emi_details: emiPayloadData ? {
         product_name: emiPayloadData.product_name,
         total_amount: emiPayloadData.total_amount,
@@ -388,7 +416,7 @@ export const AddTransactionModal: React.FC<Props> = ({
       targetAmount,
       targetNote,
       newCustPayload,
-      isGstEnabled ? gstCalc : undefined,
+      isGstEnabled && !isComposition && txMode !== 'due_payment' ? gstCalc : undefined,
       undefined,
       emiPayloadData,
       receiptDetails
@@ -811,6 +839,21 @@ export const AddTransactionModal: React.FC<Props> = ({
                       className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl text-xs font-bold outline-none"
                     />
                   </div>
+
+                  {shop.gst_enabled && (
+                    <div>
+                      <label className="block text-[11px] font-black text-slate-800 dark:text-slate-200 mb-1">
+                        HSN / SAC Code ({language === 'bn' ? 'ঐচ্ছিক' : 'Optional'})
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 8517 / 9983"
+                        value={itemHsnInput}
+                        onChange={(e) => setItemHsnInput(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl text-xs font-mono font-bold outline-none"
+                      />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>

@@ -71,7 +71,18 @@ export const printTransactionReceiptPDF = (
   const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && tx.tax_amount && tx.tax_amount > 0));
   const gstPriceMode = details?.gst_price_mode || tx.gst_price_mode || 'exclusive';
 
-  const receiptNumber = details?.receipt_number || `INV-${tx.id.replace(/\D/g, '').slice(-6) || Date.now().toString().slice(-6)}`;
+  const invoiceNumber = details?.invoice_number || details?.receipt_number || `INV-${tx.id.replace(/\D/g, '').slice(-6) || Date.now().toString().slice(-6)}`;
+  const receiptNumber = invoiceNumber;
+
+  const documentType = details?.document_type || (
+    isPurePayment
+      ? (shop.gst_enabled ? 'payment_receipt' : 'receipt')
+      : shop.gst_enabled
+        ? (shop.gst_registration_type === 'composition' ? 'bill_of_supply' : 'tax_invoice')
+        : 'receipt'
+  );
+
+  const hasHsnSac = Boolean(lineItems.some((item) => Boolean(item.hsn_sac)));
   const shopAddressStr = shop.full_address || [shop.city, shop.state, shop.postal_code].filter(Boolean).join(', ');
   const customerAddressStr = (details?.customer_address || customer.address || customer.state || '').trim();
   const customerGstinStr = (details?.customer_gstin || customer.gstin || '').trim();
@@ -229,6 +240,13 @@ export const printTransactionReceiptPDF = (
           <h1 class="shop-title">${shop.shop_name}</h1>
           ${shop.phone ? `<div class="shop-sub">📞 ${shop.phone}</div>` : ''}
           ${shop.gst_enabled && shop.gst_number ? `<div class="shop-sub" style="font-weight:700;">GSTIN: ${shop.gst_number}</div>` : ''}
+          ${shop.gst_enabled ? `
+            <div style="text-align:center; margin-top:8px;">
+              ${documentType === 'tax_invoice' ? '<span class="badge" style="background:#dbeafe; color:#1e40af; font-size:11px; padding:3px 12px; border-radius:9999px;">TAX INVOICE</span>' : ''}
+              ${documentType === 'bill_of_supply' ? '<span class="badge" style="background:#f3e8ff; color:#6b21a8; font-size:11px; padding:3px 12px; border-radius:9999px;">BILL OF SUPPLY</span><div style="font-size:10px; font-style:italic; color:#581c87; margin-top:4px;">Composition taxable person, not eligible to collect tax on supplies</div>' : ''}
+              ${documentType === 'payment_receipt' ? '<span class="badge" style="background:#d1fae5; color:#065f46; font-size:11px; padding:3px 12px; border-radius:9999px;">PAYMENT RECEIPT</span>' : ''}
+            </div>
+          ` : ''}
         </div>
 
         <!-- META GRID: CUSTOMER & RECEIPT NO -->
@@ -237,13 +255,15 @@ export const printTransactionReceiptPDF = (
             <div class="meta-label">Customer Details</div>
             <div class="meta-val">${customer.display_label || customer.name}</div>
             ${customerAddressStr ? `<div>📍 ${customerAddressStr}</div>` : ''}
+            ${(details?.customer_state || customer.state) ? `<div>State: ${details?.customer_state || customer.state}</div>` : ''}
             ${customer.phone_number ? `<div>📞 ${customer.phone_number}</div>` : ''}
             ${customerGstinStr ? `<div>GSTIN: ${customerGstinStr}</div>` : ''}
           </div>
           <div class="meta-col" style="text-align:right;">
-            <div class="meta-label">Receipt No</div>
-            <div class="meta-val" style="color:#2563eb;">${receiptNumber}</div>
+            <div class="meta-label">${shop.gst_enabled && documentType === 'tax_invoice' ? 'Tax Invoice No' : shop.gst_enabled && documentType === 'bill_of_supply' ? 'Bill of Supply No' : 'Receipt No'}</div>
+            <div class="meta-val" style="color:#2563eb;">${invoiceNumber}</div>
             <div style="margin-top:4px;">${dateFormatted} ${timeFormatted}</div>
+            ${details?.place_of_supply ? `<div style="font-size:11px; margin-top:2px;">Place of Supply: <b>${details.place_of_supply}</b></div>` : ''}
           </div>
         </div>
 
@@ -253,6 +273,7 @@ export const printTransactionReceiptPDF = (
             <thead>
               <tr>
                 <th style="text-align:left;">Item Description</th>
+                ${hasHsnSac ? '<th style="text-align:center;">HSN/SAC</th>' : ''}
                 <th style="text-align:center;">Qty</th>
                 <th style="text-align:right;">Unit Price</th>
                 <th style="text-align:right;">Amount</th>
@@ -262,6 +283,7 @@ export const printTransactionReceiptPDF = (
               ${lineItems.map((item) => `
                 <tr>
                   <td style="font-weight:700;">${item.name}</td>
+                  ${hasHsnSac ? `<td style="text-align:center; font-family:monospace; font-size:10px; color:#64748b;">${item.hsn_sac || '-'}</td>` : ''}
                   <td style="text-align:center;">${item.quantity}</td>
                   <td style="text-align:right;">${fmt(item.unit_price)}</td>
                   <td style="text-align:right; font-weight:700;">${fmt(item.total)}</td>
@@ -284,16 +306,25 @@ export const printTransactionReceiptPDF = (
                 <span>-${fmt(discountAmt)}</span>
               </div>
             ` : ''}
-            ${hasGst ? `
+            ${hasGst && documentType !== 'bill_of_supply' ? `
               <div class="breakdown-row" style="border-top:1px solid #e2e8f0; padding-top:4px;">
                 <span>Taxable Base Amount:</span>
                 <span style="font-weight:700;">${fmt(taxableAmt)}</span>
               </div>
               <div style="background:#eff6ff; padding:8px; border-radius:8px; margin:6px 0; font-size:11px;">
-                <div style="display:flex; justify-between; font-weight:800; color:#1e3a8a;">
+                <div style="display:flex; justify-content:space-between; font-weight:800; color:#1e3a8a;">
                   <span>GST (${tx.gst_rate || 18}% - ${gstPriceMode === 'inclusive' ? 'Inclusive' : 'Added'}):</span>
                   <span>+${fmt(tx.tax_amount || 0)}</span>
                 </div>
+                ${(tx.cgst_amount || 0) > 0 ? `<div style="display:flex; justify-content:space-between; color:#3b82f6;"><span>CGST:</span><span>+${fmt(tx.cgst_amount || 0)}</span></div>` : ''}
+                ${(tx.sgst_amount || 0) > 0 ? `<div style="display:flex; justify-content:space-between; color:#3b82f6;"><span>SGST:</span><span>+${fmt(tx.sgst_amount || 0)}</span></div>` : ''}
+                ${(tx.igst_amount || 0) > 0 ? `<div style="display:flex; justify-content:space-between; color:#3b82f6;"><span>IGST:</span><span>+${fmt(tx.igst_amount || 0)}</span></div>` : ''}
+              </div>
+            ` : ''}
+            ${hasGst && documentType === 'bill_of_supply' ? `
+              <div style="background:#f3e8ff; padding:8px; border-radius:8px; margin:6px 0; font-size:11px; color:#581c87; font-weight:700; display:flex; justify-content:space-between;">
+                <span>Composition Scheme:</span>
+                <span>Tax Rate 0% (Tax not collected)</span>
               </div>
             ` : ''}
             <div class="breakdown-row" style="border-top:2px solid #cbd5e1; padding-top:8px; font-size:14px; font-weight:900;">

@@ -5,6 +5,7 @@ import { CountryPhoneInput } from './CountryPhoneInput';
 import { COUNTRIES, getCountryByCode } from '../data/countries';
 import { uploadShopAsset } from '../lib/imageUtils';
 import { validatePhoneNumber, validateEmail, validateGSTIN } from '../lib/phoneValidation';
+import { INDIAN_GST_STATES, getStateCodeFromGstin } from '../lib/gstInvoiceEngine';
 import {
   ArrowLeft,
   Store,
@@ -86,6 +87,13 @@ export const ProfileScreen: React.FC<Props> = ({
   const [currencyCode, setCurrencyCode] = useState(shop.currency_code || 'BDT');
   const [gstEnabled, setGstEnabled] = useState(shop.gst_enabled || false);
   const [gstNumber, setGstNumber] = useState(shop.gst_number || '');
+  const [legalName, setLegalName] = useState(shop.legal_name || '');
+  const [gstRegistrationType, setGstRegistrationType] = useState<'regular' | 'composition'>(
+    shop.gst_registration_type || 'regular'
+  );
+  const [stateCode, setStateCode] = useState(shop.state_code || '');
+  const [invoiceSeries, setInvoiceSeries] = useState(shop.invoice_series || 'INV');
+  const [defaultTaxMode, setDefaultTaxMode] = useState<'intra' | 'inter'>(shop.default_tax_mode || 'intra');
 
   // Image URLs State
   const [logoUrl, setLogoUrl] = useState(shop.logo_url || '');
@@ -169,6 +177,11 @@ export const ProfileScreen: React.FC<Props> = ({
         currency_code: currencyCode,
         gst_enabled: gstEnabled,
         gst_number: gstNumber.trim(),
+        legal_name: legalName.trim(),
+        gst_registration_type: gstRegistrationType,
+        state_code: stateCode.trim(),
+        invoice_series: invoiceSeries.trim().toUpperCase() || 'INV',
+        default_tax_mode: defaultTaxMode,
         logo_url: logoUrl,
         shop_photo_url: shopPhotoUrl,
         signature_url: signatureUrl,
@@ -538,7 +551,22 @@ export const ProfileScreen: React.FC<Props> = ({
             </div>
 
             {gstEnabled && (
-              <div className="space-y-3">
+              <div className="space-y-3.5 pt-1 animate-in fade-in">
+                {/* Legal Name */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-900 dark:text-gray-100 mb-1">
+                    Legal / Trade Name
+                  </label>
+                  <input
+                    type="text"
+                    value={legalName}
+                    onChange={(e) => setLegalName(e.target.value)}
+                    placeholder="e.g. Acme Enterprises Private Limited"
+                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 rounded-xl border border-gray-300 dark:border-slate-600 font-bold text-sm outline-none focus:border-blue-600"
+                  />
+                </div>
+
+                {/* GSTIN */}
                 <div>
                   <label className="block text-xs font-bold text-gray-900 dark:text-gray-100 mb-1">
                     {t.gst_number}
@@ -546,28 +574,123 @@ export const ProfileScreen: React.FC<Props> = ({
                   <input
                     type="text"
                     value={gstNumber}
-                    onChange={(e) => setGstNumber(e.target.value)}
+                    onChange={(e) => {
+                      const upper = e.target.value.toUpperCase();
+                      setGstNumber(upper);
+                      const derived = getStateCodeFromGstin(upper);
+                      if (derived && !stateCode) setStateCode(derived);
+                    }}
                     placeholder={t.gst_placeholder}
-                    className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400 rounded-xl border border-gray-300 dark:border-slate-600 font-mono text-sm uppercase font-bold focus:border-blue-600 outline-none"
+                    maxLength={15}
+                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 rounded-xl border border-gray-300 dark:border-slate-600 font-mono text-sm uppercase font-bold focus:border-blue-600 outline-none"
                   />
                 </div>
 
+                {/* GST Registration Type: Regular vs Composition */}
                 <div>
                   <label className="block text-xs font-bold text-gray-900 dark:text-gray-100 mb-1">
-                    {t.select_gst_rate}
+                    GST Registration Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setGstRegistrationType('regular')}
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                        gstRegistrationType === 'regular'
+                          ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-500 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500'
+                          : 'bg-gray-50 dark:bg-slate-700 border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      Regular Taxpayer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGstRegistrationType('composition')}
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                        gstRegistrationType === 'composition'
+                          ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-500 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500'
+                          : 'bg-gray-50 dark:bg-slate-700 border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      Composition Scheme
+                    </button>
+                  </div>
+                  {gstRegistrationType === 'composition' && (
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-semibold">
+                      Composition dealers issue "Bill of Supply" at 0% tax with mandatory declaration.
+                    </p>
+                  )}
+                </div>
+
+                {/* GST State / State Code Selector */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-900 dark:text-gray-100 mb-1">
+                    Place of Supply / GST State
                   </label>
                   <select
-                    value={shop.default_gst_rate || 18}
-                    onChange={(e) => onSaveProfile({ default_gst_rate: Number(e.target.value) })}
-                    className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 rounded-xl border border-gray-300 dark:border-slate-600 font-bold text-sm outline-none"
+                    value={stateCode}
+                    onChange={(e) => setStateCode(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 rounded-xl border border-gray-300 dark:border-slate-600 font-bold text-xs outline-none focus:border-blue-600"
                   >
-                    <option value={0} className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">0% (Exempt)</option>
-                    <option value={5} className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">5%</option>
-                    <option value={12} className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">12%</option>
-                    <option value={18} className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">18% (Standard)</option>
-                    <option value={28} className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">28%</option>
+                    <option value="">Select State / Code</option>
+                    {Object.entries(INDIAN_GST_STATES).map(([code, name]) => (
+                      <option key={code} value={code}>
+                        {code} - {name}
+                      </option>
+                    ))}
                   </select>
                 </div>
+
+                {/* Invoice Prefix & Default Tax Mode */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-900 dark:text-gray-100 mb-1">
+                      Invoice Prefix / Series
+                    </label>
+                    <input
+                      type="text"
+                      value={invoiceSeries}
+                      onChange={(e) => setInvoiceSeries(e.target.value.toUpperCase())}
+                      placeholder="INV"
+                      maxLength={6}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 rounded-xl border border-gray-300 dark:border-slate-600 font-mono font-bold text-xs uppercase outline-none focus:border-blue-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-900 dark:text-gray-100 mb-1">
+                      Default Tax Mode
+                    </label>
+                    <select
+                      value={defaultTaxMode}
+                      onChange={(e) => setDefaultTaxMode(e.target.value as 'intra' | 'inter')}
+                      className="w-full px-2 py-2 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 rounded-xl border border-gray-300 dark:border-slate-600 font-bold text-xs outline-none focus:border-blue-600"
+                    >
+                      <option value="intra">Intra (CGST+SGST)</option>
+                      <option value="inter">Inter (IGST)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Default GST Rate */}
+                {gstRegistrationType !== 'composition' && (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-900 dark:text-gray-100 mb-1">
+                      {t.select_gst_rate}
+                    </label>
+                    <select
+                      value={shop.default_gst_rate || 18}
+                      onChange={(e) => onSaveProfile({ default_gst_rate: Number(e.target.value) })}
+                      className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 rounded-xl border border-gray-300 dark:border-slate-600 font-bold text-sm outline-none"
+                    >
+                      <option value={0}>0% (Exempt)</option>
+                      <option value={5}>5%</option>
+                      <option value={12}>12%</option>
+                      <option value={18}>18% (Standard)</option>
+                      <option value={28}>28%</option>
+                    </select>
+                  </div>
+                )}
               </div>
             )}
 

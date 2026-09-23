@@ -28,6 +28,7 @@ import { dispatchWhatsApp, generateVCard, validateCustomerPhone } from '../lib/w
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { getLedgerPhotoSignedUrl } from '../lib/imageUtils';
 import { CountryPhoneInput } from './CountryPhoneInput';
+import { validateGstin, INDIAN_GST_STATES } from '../lib/gstInvoiceEngine';
 
 interface Props {
   customer: Customer;
@@ -58,10 +59,27 @@ export const CustomerDetail: React.FC<Props> = ({
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
 
-  // Phone Edit / Add Modal State
-  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
-  const [editedPhone, setEditedPhone] = useState(customer.phone_number || '');
-  const [isSavingPhone, setIsSavingPhone] = useState(false);
+  // Customer Edit Modal State
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editName, setEditName] = useState(customer.name || '');
+  const [editPhone, setEditPhone] = useState(customer.phone_number || '');
+  const [editAddress, setEditAddress] = useState(customer.address || '');
+  const [editState, setEditState] = useState(customer.state || '');
+  const [editCreditLimit, setEditCreditLimit] = useState(customer.credit_limit ? String(customer.credit_limit) : '');
+  const [editGstin, setEditGstin] = useState(customer.gstin || '');
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  const openEditModal = () => {
+    setEditName(customer.name || customer.display_label || '');
+    setEditPhone(customer.phone_number || '');
+    setEditAddress(customer.address || '');
+    setEditState(customer.state || '');
+    setEditCreditLimit(customer.credit_limit ? String(customer.credit_limit) : '');
+    setEditGstin(customer.gstin || '');
+    setEditError('');
+    setIsEditModalOpen(true);
+  };
 
   // Validate phone presence
   const phoneValidation = validateCustomerPhone(customer.phone_number, shop?.country || 'IN', language);
@@ -76,7 +94,7 @@ export const CustomerDetail: React.FC<Props> = ({
   // Direct WhatsApp Chat Handoff
   const handleOpenWhatsAppChat = async () => {
     if (!hasValidPhone) {
-      setIsPhoneModalOpen(true);
+      openEditModal();
       return;
     }
 
@@ -97,7 +115,7 @@ export const CustomerDetail: React.FC<Props> = ({
   // Direct Due Reminder WhatsApp Handoff
   const handleSendDueReminder = async () => {
     if (!hasValidPhone) {
-      setIsPhoneModalOpen(true);
+      openEditModal();
       return;
     }
 
@@ -122,49 +140,94 @@ export const CustomerDetail: React.FC<Props> = ({
     showToast(t.contact_saved_notice, 'success');
   };
 
-  // Save / Update Phone Number to Supabase
-  const handleSavePhone = async (e: React.FormEvent) => {
+  // Save / Update Customer Profile with Supabase Schema-Adaptive Fallback
+  const handleSaveCustomerProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = editedPhone.trim();
-    if (!trimmed) {
-      showToast(t.enter_customer_phone, 'error');
-      return;
+    const nameTrimmed = editName.trim() || customer.name;
+    const phoneTrimmed = editPhone.trim();
+
+    if (editGstin.trim()) {
+      const gVal = validateGstin(editGstin.trim());
+      if (!gVal.isValid) {
+        setEditError(gVal.error || 'Invalid GSTIN');
+        return;
+      }
     }
 
-    setIsSavingPhone(true);
-    const updatedCustomer: Customer = {
-      ...customer,
-      phone_number: trimmed,
+    setIsSavingCustomer(true);
+    setEditError('');
+
+    const fullUpdatePayload: any = {
+      name: nameTrimmed,
+      display_label: nameTrimmed,
+      phone_number: phoneTrimmed,
+      address: editAddress.trim() || null,
+      state: editState.trim() || null,
+      credit_limit: parseFloat(editCreditLimit) || 0,
+      gstin: editGstin.trim().toUpperCase() || null,
     };
 
     if (isSupabaseConfigured && supabase && !customer.id.startsWith('cust-') && !customer.id.startsWith('temp-')) {
       try {
-        const { error } = await supabase
+        let { error } = await supabase
           .from('customers')
-          .update({ phone_number: trimmed })
+          .update(fullUpdatePayload)
           .eq('id', customer.id);
 
+        // Schema resilience: If extended columns are not yet in remote schema cache (PGRST204)
+        if (error && (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache'))) {
+          console.warn('[CUSTOMER-UPDATE] Column missing in remote schema cache, retrying with core fields:', error.message);
+          const corePayload = {
+            name: nameTrimmed,
+            display_label: nameTrimmed,
+            phone_number: phoneTrimmed,
+          };
+          const retryRes = await supabase
+            .from('customers')
+            .update(corePayload)
+            .eq('id', customer.id);
+          error = retryRes.error;
+        }
+
         if (error) {
-          console.error('[CUSTOMER-UPDATE] Failed to update phone in DB:', error);
-          showToast(error.message, 'error');
-          setIsSavingPhone(false);
+          console.error('[CUSTOMER-UPDATE] Failed to update customer in DB:', error);
+          setEditError(error.message);
+          setIsSavingCustomer(false);
           return;
         }
       } catch (err: any) {
         console.error('[CUSTOMER-UPDATE] DB update exception:', err);
-        showToast(err.message, 'error');
-        setIsSavingPhone(false);
+        setEditError(err.message || 'Database update failed');
+        setIsSavingCustomer(false);
         return;
       }
     }
+
+    const updatedCustomer: Customer = {
+      ...customer,
+      name: nameTrimmed,
+      display_label: nameTrimmed,
+      phone_number: phoneTrimmed,
+      address: editAddress.trim() || undefined,
+      state: editState.trim() || undefined,
+      credit_limit: parseFloat(editCreditLimit) || 0,
+      gstin: editGstin.trim().toUpperCase() || undefined,
+    };
 
     if (onUpdateCustomer) {
       onUpdateCustomer(updatedCustomer);
     }
 
-    setIsSavingPhone(false);
-    setIsPhoneModalOpen(false);
-    showToast(t.customer_phone_updated, 'success');
+    setIsSavingCustomer(false);
+    setIsEditModalOpen(false);
+    showToast(
+      language === 'bn'
+        ? 'কাস্টমার প্রোফাইল সফলভাবে আপডেট করা হয়েছে'
+        : language === 'hi'
+        ? 'ग्राहक प्रोफ़ाइल सफलतापूर्वक अपडेट की गई'
+        : 'Customer profile updated successfully',
+      'success'
+    );
   };
 
   // Format date helper
@@ -205,6 +268,13 @@ export const CustomerDetail: React.FC<Props> = ({
 
           <div className="flex items-center space-x-1.5 shrink-0">
             <button
+              onClick={openEditModal}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors border border-slate-700"
+              title="Edit Profile"
+            >
+              <Edit3 className="w-4 h-4" />
+            </button>
+            <button
               onClick={() => printCustomerStatementPDF(customer, transactions, shop, language)}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center space-x-1 transition-colors"
               title="Download Statement PDF"
@@ -215,20 +285,30 @@ export const CustomerDetail: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Customer Address & GSTIN Display (Phase 11 Requirement) */}
-        {(customer.address || customer.gstin) && (
-          <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] text-slate-300 space-y-0.5">
-            {customer.address && (
+        {/* Customer Address, State, Credit Limit & GSTIN Display */}
+        {(customer.address || customer.state || customer.gstin || (customer.credit_limit || 0) > 0) && (
+          <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] text-slate-300 space-y-1">
+            {(customer.address || customer.state) && (
               <div className="flex items-center space-x-1 truncate">
                 <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                <span className="truncate">{customer.address}</span>
+                <span className="truncate">
+                  {customer.address}
+                  {customer.address && customer.state ? `, ${customer.state}` : customer.state}
+                </span>
               </div>
             )}
-            {customer.gstin && (
-              <div className="font-mono text-[10px] text-blue-300 font-bold">
-                GSTIN: {customer.gstin}
-              </div>
-            )}
+            <div className="flex items-center justify-between text-[10px]">
+              {customer.gstin && (
+                <div className="font-mono text-blue-300 font-bold">
+                  GSTIN: {customer.gstin}
+                </div>
+              )}
+              {(customer.credit_limit || 0) > 0 && (
+                <div className="text-emerald-400 font-bold ml-auto">
+                  Limit: {formatShopCurrency(customer.credit_limit, shop?.country, shop?.currency_code)}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -261,7 +341,7 @@ export const CustomerDetail: React.FC<Props> = ({
             /* Add Mobile Number CTA */
             <button
               type="button"
-              onClick={() => setIsPhoneModalOpen(true)}
+              onClick={() => setIsEditModalOpen(true)}
               className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all"
             >
               <Phone className="w-4 h-4 shrink-0" />
@@ -273,7 +353,7 @@ export const CustomerDetail: React.FC<Props> = ({
           {hasValidPhone && (
             <button
               type="button"
-              onClick={() => setIsPhoneModalOpen(true)}
+              onClick={() => setIsEditModalOpen(true)}
               className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-xl border border-slate-700 shrink-0"
               title={t.update_phone}
             >
@@ -486,49 +566,128 @@ export const CustomerDetail: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Edit / Add Phone Number Modal */}
-      {isPhoneModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-3xl max-w-sm w-full p-6 space-y-4 border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95">
+      {/* Edit Customer Profile Modal */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-3xl max-w-sm w-full p-6 space-y-4 border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 my-auto max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-base flex items-center">
-                <Phone className="w-4 h-4 mr-2 text-blue-600" />
-                <span>{customer.phone_number ? t.update_phone : t.add_mobile_number}</span>
+                <Edit3 className="w-4 h-4 mr-2 text-blue-600" />
+                <span>{language === 'bn' ? 'কাস্টমার প্রোফাইল সম্পাদনা' : language === 'hi' ? 'ग्राहक प्रोफ़ाइल संपादित करें' : 'Edit Customer Profile'}</span>
               </h3>
               <button
-                onClick={() => setIsPhoneModalOpen(false)}
+                onClick={() => setIsEditModalOpen(false)}
                 className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-full"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSavePhone} className="space-y-4">
+            {editError && (
+              <div className="bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs p-2.5 rounded-xl font-bold flex items-center space-x-1.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{editError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveCustomerProfile} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1.5">
+                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1">
+                  {t.customer_name} <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold outline-none focus:border-blue-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1">
                   {t.customer_phone} <span className="text-rose-500">*</span>
                 </label>
                 <CountryPhoneInput
                   language={language}
-                  value={editedPhone}
-                  onChange={(e164) => setEditedPhone(e164)}
+                  value={editPhone}
+                  onChange={(e164) => setEditPhone(e164)}
                 />
               </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1">
+                  {t.full_address} ({language === 'bn' ? 'ঐচ্ছিক' : language === 'hi' ? 'वैकल्पिक' : 'Optional'})
+                </label>
+                <textarea
+                  rows={2}
+                  value={editAddress}
+                  onChange={(e) => setEditAddress(e.target.value)}
+                  placeholder="Street, locality, city..."
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-medium outline-none focus:border-blue-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1">
+                    State / Province
+                  </label>
+                  <input
+                    type="text"
+                    value={editState}
+                    onChange={(e) => setEditState(e.target.value)}
+                    placeholder="e.g. West Bengal"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-medium outline-none focus:border-blue-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1">
+                    Credit Limit
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={editCreditLimit}
+                    onChange={(e) => setEditCreditLimit(e.target.value)}
+                    placeholder="0 = No limit"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold outline-none focus:border-blue-600"
+                  />
+                </div>
+              </div>
+
+              {shop?.gst_enabled && (
+                <div>
+                  <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1">
+                    GSTIN ({language === 'bn' ? 'ঐচ্ছিক' : language === 'hi' ? 'वैकल्पिक' : 'Optional'})
+                  </label>
+                  <input
+                    type="text"
+                    value={editGstin}
+                    onChange={(e) => setEditGstin(e.target.value.toUpperCase())}
+                    placeholder="15-digit GSTIN (e.g. 19AAAAA0000A1Z5)"
+                    maxLength={15}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold uppercase outline-none focus:border-blue-600"
+                  />
+                </div>
+              )}
 
               <div className="flex space-x-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsPhoneModalOpen(false)}
+                  onClick={() => setIsEditModalOpen(false)}
                   className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl hover:bg-slate-200 transition-colors"
                 >
                   {t.back}
                 </button>
                 <button
                   type="submit"
-                  disabled={isSavingPhone}
+                  disabled={isSavingCustomer}
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center space-x-1 disabled:opacity-50"
                 >
-                  <span>{t.save_profile}</span>
+                  <span>{isSavingCustomer ? (language === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...') : t.save_profile}</span>
                 </button>
               </div>
             </form>

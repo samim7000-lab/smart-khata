@@ -31,6 +31,13 @@ export interface Shop {
   plan_tier?: PlanTier;
   branch_name?: string;
   parent_shop_id?: string;
+
+  // Phase G: GST Invoicing & Compliance (v19)
+  legal_name?: string;
+  state_code?: string;
+  gst_registration_type?: 'regular' | 'composition';
+  default_tax_mode?: 'intra' | 'inter';
+  invoice_series?: string;
 }
 
 export interface Customer {
@@ -42,6 +49,7 @@ export interface Customer {
   state?: string; // Customer state for GST intra vs inter-state detection
   address?: string;
   gstin?: string;
+  credit_limit?: number; // Authorized credit limit (0 = default/unrestricted)
   created_at: string;
   balance?: number; // Positive = customer owes money (credit), Negative = customer overpaid, 0 = settled
 }
@@ -51,6 +59,7 @@ export type TransactionType = 'credit_given' | 'payment_received' | 'void_correc
 export type TaxType = 'intra' | 'inter' | 'none';
 export type DiscountType = 'fixed' | 'percentage';
 export type GstPriceMode = 'inclusive' | 'exclusive';
+export type GstDocumentType = 'tax_invoice' | 'bill_of_supply' | 'payment_receipt' | 'receipt';
 
 export interface ReceiptItem {
   id: string;
@@ -58,6 +67,63 @@ export interface ReceiptItem {
   quantity: number;
   unit_price: number;
   total: number;
+  hsn_sac?: string;
+  gst_rate?: number;
+  taxable_amount?: number;
+  cgst_amount?: number;
+  sgst_amount?: number;
+  igst_amount?: number;
+}
+
+export interface InvoiceItem {
+  id: string;
+  name: string;
+  hsn_sac?: string;
+  quantity: number;
+  unit_price: number;
+  gst_rate: number;
+  taxable_amount: number;
+  cgst_amount: number;
+  sgst_amount: number;
+  igst_amount: number;
+  total: number;
+}
+
+export interface InvoiceRecord {
+  id?: string;
+  shop_id: string;
+  customer_id?: string;
+  transaction_id?: string;
+  document_type: GstDocumentType;
+  financial_year: string;
+  invoice_series: string;
+  invoice_number: string;
+  issue_date?: string;
+  supply_type: 'intra' | 'inter';
+  place_of_supply?: string;
+  reverse_charge?: boolean;
+  supplier_legal_name: string;
+  supplier_address?: string;
+  supplier_gstin?: string;
+  supplier_state?: string;
+  supplier_state_code?: string;
+  recipient_name: string;
+  recipient_address?: string;
+  recipient_gstin?: string;
+  recipient_state?: string;
+  recipient_state_code?: string;
+  taxable_amount: number;
+  cgst_amount: number;
+  sgst_amount: number;
+  igst_amount: number;
+  total_tax_amount: number;
+  discount_amount: number;
+  grand_total: number;
+  items: InvoiceItem[] | ReceiptItem[];
+  notes?: string;
+  status?: 'issued' | 'cancelled';
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ReceiptDetailsPayload {
@@ -75,9 +141,27 @@ export interface ReceiptDetailsPayload {
   payment_method?: string;
   gst_enabled?: boolean;
   customer_address?: string;
+  customer_state?: string;
   customer_gstin?: string;
+  customer_state_code?: string;
   receipt_number?: string;
   notes?: string;
+  document_type?: GstDocumentType;
+  financial_year?: string;
+  invoice_number?: string;
+  invoice_series?: string;
+  hsn_sac?: string;
+  supply_type?: 'intra' | 'inter';
+  place_of_supply?: string;
+  is_composition?: boolean;
+  statutory_notice?: string;
+  supplier_legal_name?: string;
+  supplier_gstin?: string;
+  supplier_state_code?: string;
+  cgst_amount?: number;
+  sgst_amount?: number;
+  igst_amount?: number;
+  total_tax_amount?: number;
   emi_details?: {
     product_name: string;
     total_amount: number;
