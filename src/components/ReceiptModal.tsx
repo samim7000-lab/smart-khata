@@ -29,7 +29,7 @@ import { printTransactionReceiptPDF } from '../lib/pdfGenerator';
 import { getWhatsAppUrl } from '../lib/whatsappUtils';
 import { dispatchWhatsApp, validateCustomerPhone, buildWhatsAppMessage } from '../lib/whatsappService';
 import { formatShopCurrency } from '../lib/countryPricing';
-import { unpackReceiptNote, calculatePreviousBalance } from '../lib/receiptUtils';
+import { unpackReceiptNote, calculatePreviousBalance, getCanonicalReceiptDetails } from '../lib/receiptUtils';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { getLedgerPhotoSignedUrl } from '../lib/imageUtils';
 import { CountryPhoneInput } from './CountryPhoneInput';
@@ -109,8 +109,9 @@ export const ReceiptModal: React.FC<Props> = ({
     { hour: '2-digit', minute: '2-digit' }
   );
 
-  // Unpack line items & receipt payload details
-  const { noteText, details } = unpackReceiptNote(transaction);
+  // Unpack line items & receipt payload details with canonical consistency guarantee
+  const { noteText } = unpackReceiptNote(transaction);
+  const details = getCanonicalReceiptDetails(transaction, activeCustomer, shop);
   const mode = details?.mode || (isCredit ? 'credit_sale' : 'due_payment');
 
   // Dynamic Type Labels adhering strictly to Requirement #13 (Proper English Terminology)
@@ -159,8 +160,14 @@ export const ReceiptModal: React.FC<Props> = ({
   const discountAmt = details?.discount_amount || 0;
   const taxableAmt = details?.taxable_amount !== undefined ? details.taxable_amount : Math.max(0, subtotal - discountAmt);
   
+  // Tax calculations with split breakdown support
+  const cgstAmt = details?.cgst_amount ?? transaction.cgst_amount ?? 0;
+  const sgstAmt = details?.sgst_amount ?? transaction.sgst_amount ?? 0;
+  const igstAmt = details?.igst_amount ?? transaction.igst_amount ?? 0;
+  const totalTax = cgstAmt + sgstAmt + igstAmt || Number(transaction.tax_amount) || 0;
+
   // Requirement #5 & #12: GST must be OPTIONAL. If disabled, do not render GST block!
-  const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && transaction.tax_amount && transaction.tax_amount > 0));
+  const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && totalTax > 0));
   const gstPriceMode = details?.gst_price_mode || transaction.gst_price_mode || 'exclusive';
 
   // Receipt / Invoice Number & Document Type
@@ -200,13 +207,24 @@ export const ReceiptModal: React.FC<Props> = ({
   const hasValidPhone = phoneVal.isValid;
   const waUrl = getWhatsAppUrl(activeCustomer.phone_number, receiptText, shop.country || 'IN');
 
-  // Ultra High Resolution 4K Image Generation via html2canvas (Scale 4.0 for sharp font rendering)
+  // Ultra High Resolution Document Image Generation via html2canvas (Standardized 600px width target for crisp rendering)
   const generateCanvasFile = async (): Promise<File | null> => {
     if (!receiptRef.current) return null;
     try {
-      const targetScale = 4.0;
+      const targetScale = 3.0;
       const canvas = await html2canvas(receiptRef.current, {
         scale: targetScale,
+        width: 600,
+        windowWidth: 600,
+        onclone: (clonedDoc: Document) => {
+          const el = clonedDoc.querySelector('.printable-receipt') as HTMLElement;
+          if (el) {
+            el.style.width = '600px';
+            el.style.maxWidth = '600px';
+            el.style.minWidth = '600px';
+            el.style.boxSizing = 'border-box';
+          }
+        },
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
@@ -587,22 +605,28 @@ export const ReceiptModal: React.FC<Props> = ({
                       <span>Rate: {transaction.gst_rate || 18}%</span>
                     </div>
 
-                    {(transaction.cgst_amount || 0) > 0 && (
+                    {cgstAmt > 0 && (
                       <div className="flex justify-between">
                         <span>CGST ({(transaction.gst_rate || 0) / 2}%):</span>
-                        <span>+{fmt(transaction.cgst_amount || 0)}</span>
+                        <span>+{fmt(cgstAmt)}</span>
                       </div>
                     )}
-                    {(transaction.sgst_amount || 0) > 0 && (
+                    {sgstAmt > 0 && (
                       <div className="flex justify-between">
                         <span>SGST ({(transaction.gst_rate || 0) / 2}%):</span>
-                        <span>+{fmt(transaction.sgst_amount || 0)}</span>
+                        <span>+{fmt(sgstAmt)}</span>
                       </div>
                     )}
-                    {(transaction.igst_amount || 0) > 0 && (
+                    {igstAmt > 0 && (
                       <div className="flex justify-between">
-                        <span>IGST ({transaction.gst_rate}%):</span>
-                        <span>+{fmt(transaction.igst_amount || 0)}</span>
+                        <span>IGST ({transaction.gst_rate || 18}%):</span>
+                        <span>+{fmt(igstAmt)}</span>
+                      </div>
+                    )}
+                    {cgstAmt === 0 && sgstAmt === 0 && igstAmt === 0 && totalTax > 0 && (
+                      <div className="flex justify-between">
+                        <span>GST ({transaction.gst_rate || 18}%):</span>
+                        <span>+{fmt(totalTax)}</span>
                       </div>
                     )}
                   </div>

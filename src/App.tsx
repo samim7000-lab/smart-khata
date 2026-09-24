@@ -638,6 +638,10 @@ export const App: React.FC = () => {
               phone: normalizedPhone,
               whatsapp_number: normalizedWhatsapp,
               plan_tier: resolvedPlanTier,
+              gst_enabled:
+                primaryShopRecord.gst_enabled !== undefined && primaryShopRecord.gst_enabled !== null
+                  ? Boolean(primaryShopRecord.gst_enabled)
+                  : Boolean(cachedProfile?.gst_enabled),
               logo_url: primaryShopRecord.logo_url || cachedProfile?.logo_url,
               signature_url: primaryShopRecord.signature_url || cachedProfile?.signature_url,
               shop_photo_url: primaryShopRecord.shop_photo_url || cachedProfile?.shop_photo_url,
@@ -1052,6 +1056,10 @@ export const App: React.FC = () => {
         if (data) {
           const finalShop: Shop = {
             ...data,
+            gst_enabled:
+              data.gst_enabled !== undefined && data.gst_enabled !== null
+                ? Boolean(data.gst_enabled)
+                : merged.gst_enabled,
             logo_url: data.logo_url || merged.logo_url,
             signature_url: data.signature_url || merged.signature_url,
             shop_photo_url: data.shop_photo_url || merged.shop_photo_url,

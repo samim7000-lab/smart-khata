@@ -203,7 +203,7 @@ export const ShopSetup: React.FC<Props> = ({
       currency_code: selectedCountry.currencyCode,
       email: email.trim(),
       gst_number: gstNumber.trim().toUpperCase(),
-      gst_enabled: Boolean(gstNumber.trim()),
+      gst_enabled: initialShop?.gst_enabled !== undefined ? initialShop.gst_enabled : Boolean(gstNumber.trim()),
       full_address: fullAddress.trim(),
       state: stateDist.trim(),
       business_type: businessType.trim(),

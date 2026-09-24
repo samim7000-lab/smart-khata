@@ -40,8 +40,9 @@ export const calculateGst = (
 
   const normShopState = (shopState || '').trim().toLowerCase();
   const normCustState = (customerState || '').trim().toLowerCase();
-  const isSameState = normShopState !== '' && normCustState !== '' && normShopState === normCustState;
-  const taxType: TaxType = isSameState ? 'intra' : 'inter';
+  // In Indian GST, over-the-counter local retail supplies without an explicit different state are Intra-State (CGST+SGST)
+  const isInterState = normCustState !== '' && normShopState !== '' && normCustState !== normShopState;
+  const taxType: TaxType = isInterState ? 'inter' : 'intra';
 
   let baseAmount = 0;
   let taxAmount = 0;

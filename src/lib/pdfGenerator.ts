@@ -1,7 +1,52 @@
 import { Customer, Shop, Transaction } from '../types';
 import { translations } from '../i18n/translations';
 import { formatShopCurrency } from './countryPricing';
-import { unpackReceiptNote, calculatePreviousBalance } from './receiptUtils';
+import { unpackReceiptNote, calculatePreviousBalance, getCleanTransactionNote } from './receiptUtils';
+
+/**
+ * Execute print via a clean, hidden in-page iframe.
+ * Eliminates window.open launch of Chrome, preventing app pause/freeze on mobile WebViews.
+ */
+const executeIframePrint = (htmlContent: string): void => {
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.style.visibility = 'hidden';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(htmlContent);
+      doc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.warn('[PDF-PRINT] Iframe print focus error:', e);
+        } finally {
+          setTimeout(() => {
+            try {
+              if (iframe.parentNode) {
+                iframe.parentNode.removeChild(iframe);
+              }
+            } catch {}
+          }, 2000);
+        }
+      }, 400);
+    }
+  } catch (err) {
+    console.error('[PDF-PRINT] Execution exception:', err);
+    alert('Failed to launch print dialog.');
+  }
+};
 
 // Generate printable HTML PDF for single transaction receipt
 export const printTransactionReceiptPDF = (
@@ -86,12 +131,6 @@ export const printTransactionReceiptPDF = (
   const shopAddressStr = shop.full_address || [shop.city, shop.state, shop.postal_code].filter(Boolean).join(', ');
   const customerAddressStr = (details?.customer_address || customer.address || customer.state || '').trim();
   const customerGstinStr = (details?.customer_gstin || customer.gstin || '').trim();
-
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    alert('Please allow popups to download or print PDF receipts.');
-    return;
-  }
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -413,8 +452,7 @@ export const printTransactionReceiptPDF = (
     </html>
   `;
 
-  printWindow.document.write(htmlContent);
-  printWindow.document.close();
+  executeIframePrint(htmlContent);
 };
 
 // Generate printable HTML PDF for full customer account statement
@@ -426,12 +464,6 @@ export const printCustomerStatementPDF = (
 ) => {
   const t = translations[language];
   const curr = t.currency_symbol;
-
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    alert('Please allow popups to download or print PDF statements.');
-    return;
-  }
 
   const sortedTxs = [...transactions].sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
@@ -451,10 +483,12 @@ export const printCustomerStatementPDF = (
         year: 'numeric',
       });
 
+      const cleanNote = getCleanTransactionNote(tx);
+
       return `
       <tr style="${tx.is_voided ? 'opacity: 0.5; text-decoration: line-through;' : ''}">
         <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 13px;">${dateStr}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 13px;">${tx.note || (isCredit ? t.credit_given : t.payment_received)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 13px;">${cleanNote || (isCredit ? t.credit_given : t.payment_received)}</td>
         <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 13px; text-align: right; color: #dc2626; font-weight: 700;">
           ${isCredit ? curr + ' ' + Number(tx.amount).toLocaleString() : '-'}
         </td>
@@ -615,8 +649,7 @@ export const printCustomerStatementPDF = (
     </html>
   `;
 
-  printWindow.document.write(htmlContent);
-  printWindow.document.close();
+  executeIframePrint(htmlContent);
 };
 
 // Generate printable HTML PDF for Monthly Business Summary Report
@@ -656,12 +689,6 @@ export const printMonthlyBusinessReportPDF = (
     `
     )
     .join('');
-
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    alert('Please allow popups to download or print PDF business reports.');
-    return;
-  }
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -805,6 +832,5 @@ export const printMonthlyBusinessReportPDF = (
     </html>
   `;
 
-  printWindow.document.write(htmlContent);
-  printWindow.document.close();
+  executeIframePrint(htmlContent);
 };

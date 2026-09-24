@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 import { formatShopCurrency } from '../lib/countryPricing';
-import { unpackReceiptNote } from '../lib/receiptUtils';
+import { unpackReceiptNote, cleanNoteString } from '../lib/receiptUtils';
 
 interface Props {
   transactions: Transaction[];
@@ -40,6 +40,7 @@ export const HistoryScreen: React.FC<Props> = ({
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'sales' | 'payments' | 'emi' | 'gst'>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'credit_given' | 'payment_received' | 'void_correction'>('all');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('all');
@@ -63,24 +64,53 @@ export const HistoryScreen: React.FC<Props> = ({
     const cust = getCustomer(tx.customer_id);
     const custName = cust?.name || '';
     const custPhone = cust?.phone_number || '';
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
 
-    // 1. Search Query Match
-    const matchesSearch =
-      custName.toLowerCase().includes(q) ||
-      custPhone.includes(q) ||
-      tx.id.toLowerCase().includes(q) ||
-      (tx.note && tx.note.toLowerCase().includes(q));
+    const { noteText, details } = unpackReceiptNote(tx);
+    const cleanNote = noteText || (tx.note ? cleanNoteString(tx.note) : '');
 
-    if (!matchesSearch) return false;
+    // 1. Search Query Match (Guaranteed clean of raw JSON leakage)
+    if (q) {
+      const matchesSearch =
+        custName.toLowerCase().includes(q) ||
+        custPhone.includes(q) ||
+        tx.id.toLowerCase().includes(q) ||
+        cleanNote.toLowerCase().includes(q) ||
+        (details?.invoice_number && details.invoice_number.toLowerCase().includes(q));
 
-    // 2. Type Filter Match
+      if (!matchesSearch) return false;
+    }
+
+    // 2. Structured Category Filter (All, Sales, Payments, EMI, GST Invoices)
+    if (categoryFilter === 'sales') {
+      const isSale = tx.type === 'credit_given' || details?.mode === 'cash_sale' || details?.mode === 'credit_sale';
+      if (!isSale) return false;
+    } else if (categoryFilter === 'payments') {
+      const isPay = tx.type === 'payment_received' || details?.mode === 'due_payment';
+      if (!isPay) return false;
+    } else if (categoryFilter === 'emi') {
+      const isEmi = details?.mode === 'emi_plan' || Boolean(details?.emi_details) || /emi/i.test(cleanNote);
+      if (!isEmi) return false;
+    } else if (categoryFilter === 'gst') {
+      const isGst = Boolean(
+        (tx.tax_amount && tx.tax_amount > 0) ||
+        details?.gst_enabled ||
+        details?.cgst_amount ||
+        details?.sgst_amount ||
+        details?.igst_amount ||
+        details?.document_type === 'tax_invoice' ||
+        details?.document_type === 'bill_of_supply'
+      );
+      if (!isGst) return false;
+    }
+
+    // 3. Type Filter Match
     if (typeFilter !== 'all' && tx.type !== typeFilter) return false;
 
-    // 3. Customer Filter Match
+    // 4. Customer Filter Match
     if (selectedCustomerId !== 'all' && tx.customer_id !== selectedCustomerId) return false;
 
-    // 4. Date Filter Match
+    // 5. Date Filter Match
     const txTime = new Date(tx.created_at).getTime();
     if (dateFilter === 'today' && txTime < todayStart) return false;
     if (dateFilter === 'week' && txTime < weekStart) return false;
@@ -123,7 +153,7 @@ export const HistoryScreen: React.FC<Props> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 max-w-4xl mx-auto p-4 pb-24 space-y-4">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 max-w-4xl mx-auto p-4 pb-24 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2.5">
@@ -131,29 +161,29 @@ export const HistoryScreen: React.FC<Props> = ({
             <History className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-black text-slate-900">{t.transaction_history}</h1>
-            <p className="text-xs text-slate-500 font-medium">{filteredTransactions.length} records</p>
+            <h1 className="text-xl font-black text-slate-900 dark:text-slate-100">{t.transaction_history}</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{filteredTransactions.length} records</p>
           </div>
         </div>
       </div>
 
       {/* Filter Controls Bar */}
-      <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
         {/* Search */}
         <div className="relative flex items-center">
-          <Search className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+          <Search className="w-4 h-4 absolute left-3.5 text-slate-400 dark:text-slate-500 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t.search_placeholder}
-            className="w-full pl-10 pr-10 py-2.5 bg-slate-50 hover:bg-slate-100/80 focus:bg-white text-slate-900 placeholder-slate-400 caret-blue-600 rounded-xl border border-slate-200 text-sm font-semibold outline-none focus:border-blue-600 transition-colors"
+            className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100/80 dark:hover:bg-slate-700/80 focus:bg-white dark:focus:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 caret-blue-600 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-semibold outline-none focus:border-blue-600 transition-colors"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors"
+              className="absolute right-3 p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
               aria-label="Clear search"
             >
               <X className="w-4 h-4" />
@@ -161,17 +191,41 @@ export const HistoryScreen: React.FC<Props> = ({
           )}
         </div>
 
+        {/* Structured Category Filter Chips (Requirement #6) */}
+        <div className="flex items-center space-x-2 overflow-x-auto pb-1 no-scrollbar">
+          {[
+            { id: 'all', label: t.all || 'All' },
+            { id: 'sales', label: language === 'bn' ? 'বিক্রি' : language === 'hi' ? 'बिक्री' : 'Sales' },
+            { id: 'payments', label: language === 'bn' ? 'আদায় / জমা' : language === 'hi' ? 'भुगतान' : 'Payments' },
+            { id: 'emi', label: 'EMI' },
+            { id: 'gst', label: language === 'bn' ? 'জিএসটি ইনভয়েস' : language === 'hi' ? 'जीएसटी बिल' : 'GST Invoices' },
+          ].map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              onClick={() => setCategoryFilter(chip.id as any)}
+              className={`px-3 py-1.5 rounded-full text-xs font-black transition-all shrink-0 ${
+                categoryFilter === chip.id
+                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+
         {/* Dropdown Filters Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {/* Time Filter */}
           <div>
-            <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
               {t.date_filter}
             </label>
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value as any)}
-              className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white transition-colors"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100/80 dark:hover:bg-slate-700/80 text-slate-900 dark:text-slate-100 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-900 transition-colors"
             >
               <option value="all">{t.all_time}</option>
               <option value="today">{t.today}</option>
@@ -183,13 +237,13 @@ export const HistoryScreen: React.FC<Props> = ({
 
           {/* Type Filter */}
           <div>
-            <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
               {t.tx_type_filter}
             </label>
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as any)}
-              className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white transition-colors"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100/80 dark:hover:bg-slate-700/80 text-slate-900 dark:text-slate-100 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-900 transition-colors"
             >
               <option value="all">{t.all}</option>
               <option value="credit_given">{t.credit_given}</option>
@@ -200,13 +254,13 @@ export const HistoryScreen: React.FC<Props> = ({
 
           {/* Customer Filter */}
           <div>
-            <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
               {t.select_customer}
             </label>
             <select
               value={selectedCustomerId}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white transition-colors"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100/80 dark:hover:bg-slate-700/80 text-slate-900 dark:text-slate-100 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-900 transition-colors"
             >
               <option value="all">{t.all} ({customers.length})</option>
               {customers.map((c) => (
@@ -220,19 +274,19 @@ export const HistoryScreen: React.FC<Props> = ({
 
         {/* Custom Date Range Inputs */}
         {dateFilter === 'custom' && (
-          <div className="flex items-center space-x-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center space-x-2 pt-2 border-t border-slate-100 dark:border-slate-800">
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="flex-1 px-3 py-2 bg-slate-50 text-slate-900 rounded-xl border border-slate-200 text-xs font-medium outline-none focus:border-blue-600 focus:bg-white"
+              className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-900"
             />
             <span className="text-xs text-slate-400 font-semibold">to</span>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="flex-1 px-3 py-2 bg-slate-50 text-slate-900 rounded-xl border border-slate-200 text-xs font-medium outline-none focus:border-blue-600 focus:bg-white"
+              className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-900"
             />
           </div>
         )}
@@ -241,9 +295,9 @@ export const HistoryScreen: React.FC<Props> = ({
       {/* Transaction List */}
       <div className="space-y-3">
         {filteredTransactions.length === 0 ? (
-          <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center space-y-2">
-            <AlertCircle className="w-10 h-10 text-slate-300 mx-auto" />
-            <p className="text-sm font-bold text-slate-500">{t.no_history_found}</p>
+          <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-2">
+            <AlertCircle className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
+            <p className="text-sm font-bold text-slate-500 dark:text-slate-400">{t.no_history_found}</p>
           </div>
         ) : (
           filteredTransactions.map((tx) => {
@@ -271,6 +325,16 @@ export const HistoryScreen: React.FC<Props> = ({
                       {details?.payment_method && (
                         <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800 shrink-0">
                           💳 {details.payment_method}
+                        </span>
+                      )}
+                      {Boolean((tx.tax_amount && tx.tax_amount > 0) || details?.gst_enabled) && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800 shrink-0">
+                          GST
+                        </span>
+                      )}
+                      {(details?.mode === 'emi_plan' || Boolean(details?.emi_details)) && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 border border-purple-200 dark:border-purple-800 shrink-0">
+                          EMI
                         </span>
                       )}
                     </div>
