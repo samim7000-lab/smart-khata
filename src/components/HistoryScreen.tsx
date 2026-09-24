@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 import { formatShopCurrency } from '../lib/countryPricing';
-import { unpackReceiptNote, cleanNoteString } from '../lib/receiptUtils';
+import { unpackReceiptNote, cleanNoteString, getCanonicalReceiptDetails } from '../lib/receiptUtils';
 
 interface Props {
   transactions: Transaction[];
@@ -92,9 +92,11 @@ export const HistoryScreen: React.FC<Props> = ({
       const isEmi = details?.mode === 'emi_plan' || Boolean(details?.emi_details) || /emi/i.test(cleanNote);
       if (!isEmi) return false;
     } else if (categoryFilter === 'gst') {
+      const canonical = getCanonicalReceiptDetails(tx, cust, shop);
       const isGst = Boolean(
         (tx.tax_amount && tx.tax_amount > 0) ||
         details?.gst_enabled ||
+        canonical?.gst_enabled ||
         details?.cgst_amount ||
         details?.sgst_amount ||
         details?.igst_amount ||
@@ -366,7 +368,7 @@ export const HistoryScreen: React.FC<Props> = ({
                 </div>
 
                 {noteText && (
-                  <div className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 italic font-medium">
+                  <div className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 italic font-medium break-words break-all">
                     📝 {noteText}
                   </div>
                 )}

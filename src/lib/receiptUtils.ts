@@ -7,7 +7,8 @@ import { formatShopCurrency } from './countryPricing';
 export function cleanNoteString(rawNote?: string): string {
   if (!rawNote) return '';
   return rawNote
-    .replace(/\[?RECEIPT_JSON:[\s\S]*?\]?/gi, '')
+    .replace(/\[\s*RECEIPT_JSON:[\s\S]*?\]/gi, '')
+    .replace(/\[?\s*RECEIPT_JSON:[\s\S]*$/gi, '')
     .replace(/\{"mode":[\s\S]*?\}/gi, '')
     .trim();
 }
@@ -38,10 +39,14 @@ export function unpackReceiptNote(tx: Transaction): { noteText: string; details:
   }
 
   const rawNote = tx.note || '';
-  const match = rawNote.match(/\[?RECEIPT_JSON:([\s\S]*?)\]?/i);
+  const match = rawNote.match(/\[\s*RECEIPT_JSON:([\s\S]+?)\]/i) || rawNote.match(/\[?\s*RECEIPT_JSON:([\s\S]+)/i);
   if (match && match[1]) {
     try {
-      const parsed: ReceiptDetailsPayload = JSON.parse(match[1]);
+      let jsonCandidate = match[1].trim();
+      if (jsonCandidate.endsWith(']') && !jsonCandidate.startsWith('[')) {
+        jsonCandidate = jsonCandidate.replace(/\]+$/, '').trim();
+      }
+      const parsed: ReceiptDetailsPayload = JSON.parse(jsonCandidate);
       return { noteText, details: parsed };
     } catch (e) {
       console.warn('Failed to parse receipt details JSON from note tag:', e);
@@ -86,6 +91,10 @@ export function getCanonicalReceiptDetails(
   const txAmt = Number(tx.amount) || 0;
   const hasTax = Boolean(tx.tax_amount && tx.tax_amount > 0);
   const isGstEnabled = Boolean(hasTax || (shop && shop.gst_enabled));
+  const totalTax = tx.tax_amount || 0;
+  const calcCgst = tx.cgst_amount || (totalTax > 0 ? Math.round((totalTax / 2) * 100) / 100 : 0);
+  const calcSgst = tx.sgst_amount || (totalTax > 0 ? Math.round((totalTax - calcCgst) * 100) / 100 : 0);
+  const effectiveRate = tx.gst_rate || (tx.base_amount && totalTax > 0 ? Math.round((totalTax / tx.base_amount) * 100) : (shop?.default_gst_rate || 18));
 
   const docType = isPurePayment
     ? (isGstEnabled ? 'payment_receipt' : 'receipt')
@@ -114,8 +123,9 @@ export function getCanonicalReceiptDetails(
     customer_address: customer?.address || customer?.state,
     customer_gstin: customer?.gstin,
     customer_state: customer?.state,
-    cgst_amount: tx.cgst_amount || 0,
-    sgst_amount: tx.sgst_amount || 0,
+    gst_rate: effectiveRate,
+    cgst_amount: calcCgst,
+    sgst_amount: calcSgst,
     igst_amount: tx.igst_amount || 0,
     supplier_gstin: shop?.gst_number,
     receipt_number: `INV-${tx.id.replace(/\D/g, '').slice(-6) || Date.now().toString().slice(-6)}`,

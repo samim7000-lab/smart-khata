@@ -140,6 +140,7 @@ export interface ReceiptDetailsPayload {
   new_due_amount?: number;
   payment_method?: string;
   gst_enabled?: boolean;
+  gst_rate?: number;
   customer_address?: string;
   customer_state?: string;
   customer_gstin?: string;

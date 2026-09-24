@@ -4,7 +4,7 @@ import { formatShopCurrency } from './countryPricing';
 import { MetaCloudApiService } from './metaCloudApi';
 import { EMIInstallmentDB, EMIAccountDB } from './emiService';
 import { replaceMessageVariables } from './communicationEngine';
-import { unpackReceiptNote } from './receiptUtils';
+import { unpackReceiptNote, getCanonicalReceiptDetails } from './receiptUtils';
 
 export type WhatsAppMessageType =
   | 'RECEIPT'
@@ -192,13 +192,31 @@ export function buildWhatsAppMessage(options: WhatsAppMessageOptions): string {
       const discountLabel = details?.discount_type === 'percentage' && details?.discount_value ? `${details.discount_value}%` : (language === 'bn' ? 'নির্দিষ্ট' : language === 'hi' ? 'निश्चित' : 'Fixed');
 
       // GST Details
-      const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && tx?.tax_amount && tx.tax_amount > 0));
-      const gstRate = tx?.gst_rate || shop.default_gst_rate || 18;
-      const taxableBase = details?.taxable_amount !== undefined ? details.taxable_amount : Math.max(0, subtotal - discountAmt);
-      const cgstAmt = tx?.cgst_amount || 0;
-      const sgstAmt = tx?.sgst_amount || 0;
-      const igstAmt = tx?.igst_amount || 0;
-      const gstPriceMode = details?.gst_price_mode || tx?.gst_price_mode || 'inclusive';
+      const canonicalDetails = details || (tx ? getCanonicalReceiptDetails(tx, customer, shop) : null);
+      const hasGst = Boolean(canonicalDetails?.gst_enabled ?? (shop.gst_enabled && tx?.tax_amount && tx.tax_amount > 0));
+      const gstRate = canonicalDetails?.gst_rate || tx?.gst_rate || shop.default_gst_rate || 18;
+      const halfRate = gstRate / 2;
+      const gstPriceMode = canonicalDetails?.gst_price_mode || tx?.gst_price_mode || 'inclusive';
+
+      let cgstAmt = canonicalDetails?.cgst_amount ?? tx?.cgst_amount ?? 0;
+      let sgstAmt = canonicalDetails?.sgst_amount ?? tx?.sgst_amount ?? 0;
+      let igstAmt = canonicalDetails?.igst_amount ?? tx?.igst_amount ?? 0;
+      const totalTax = cgstAmt + sgstAmt + igstAmt || Number(tx?.tax_amount) || 0;
+
+      if (hasGst && totalTax > 0 && cgstAmt === 0 && sgstAmt === 0 && igstAmt === 0) {
+        if (canonicalDetails?.supply_type === 'inter') {
+          igstAmt = totalTax;
+        } else {
+          cgstAmt = Math.round((totalTax / 2) * 100) / 100;
+          sgstAmt = Math.round((totalTax - cgstAmt) * 100) / 100;
+        }
+      }
+
+      const taxableBase = canonicalDetails?.taxable_amount !== undefined
+        ? canonicalDetails.taxable_amount
+        : (hasGst && gstPriceMode === 'inclusive' && totalTax > 0
+            ? Math.round((txAmt - totalTax) * 100) / 100
+            : Math.max(0, subtotal - discountAmt));
 
       // Balances
       const prevBal = details?.previous_balance !== undefined ? details.previous_balance : (customer.balance || 0);
@@ -258,11 +276,13 @@ export function buildWhatsAppMessage(options: WhatsAppMessageOptions): string {
           }
           if (hasGst) {
             msg += `করযোগ্য মূল্য: ${fmt(taxableBase)}\n`;
-            if (cgstAmt > 0) msg += `CGST (${gstRate / 2}%): +${fmt(cgstAmt)}\n`;
-            if (sgstAmt > 0) msg += `SGST (${gstRate / 2}%): +${fmt(sgstAmt)}\n`;
+            if (cgstAmt > 0) msg += `CGST (${halfRate}%): +${fmt(cgstAmt)}\n`;
+            if (sgstAmt > 0) msg += `SGST (${halfRate}%): +${fmt(sgstAmt)}\n`;
             if (igstAmt > 0) msg += `IGST (${gstRate}%): +${fmt(igstAmt)}\n`;
           }
-          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && tx?.tax_amount ? (taxableBase + tx.tax_amount) : Math.max(0, subtotal - discountAmt);
+          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && totalTax > 0
+            ? (taxableBase + totalTax)
+            : (canonicalDetails?.paid_amount || txAmt || Math.max(0, subtotal - discountAmt));
           msg += `💰 *সর্বমোট মূল্য:* ${fmt(grandTotalAmt)}\n`;
           msg += `----------------------------\n`;
         }
@@ -343,11 +363,13 @@ export function buildWhatsAppMessage(options: WhatsAppMessageOptions): string {
           }
           if (hasGst) {
             msg += `कर योग्य मूल्य: ${fmt(taxableBase)}\n`;
-            if (cgstAmt > 0) msg += `CGST (${gstRate / 2}%): +${fmt(cgstAmt)}\n`;
-            if (sgstAmt > 0) msg += `SGST (${gstRate / 2}%): +${fmt(sgstAmt)}\n`;
+            if (cgstAmt > 0) msg += `CGST (${halfRate}%): +${fmt(cgstAmt)}\n`;
+            if (sgstAmt > 0) msg += `SGST (${halfRate}%): +${fmt(sgstAmt)}\n`;
             if (igstAmt > 0) msg += `IGST (${gstRate}%): +${fmt(igstAmt)}\n`;
           }
-          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && tx?.tax_amount ? (taxableBase + tx.tax_amount) : Math.max(0, subtotal - discountAmt);
+          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && totalTax > 0
+            ? (taxableBase + totalTax)
+            : (canonicalDetails?.paid_amount || txAmt || Math.max(0, subtotal - discountAmt));
           msg += `💰 *कुल योग:* ${fmt(grandTotalAmt)}\n`;
           msg += `----------------------------\n`;
         }
@@ -428,11 +450,13 @@ export function buildWhatsAppMessage(options: WhatsAppMessageOptions): string {
           }
           if (hasGst) {
             msg += `Taxable Base: ${fmt(taxableBase)}\n`;
-            if (cgstAmt > 0) msg += `CGST (${gstRate / 2}%): +${fmt(cgstAmt)}\n`;
-            if (sgstAmt > 0) msg += `SGST (${gstRate / 2}%): +${fmt(sgstAmt)}\n`;
+            if (cgstAmt > 0) msg += `CGST (${halfRate}%): +${fmt(cgstAmt)}\n`;
+            if (sgstAmt > 0) msg += `SGST (${halfRate}%): +${fmt(sgstAmt)}\n`;
             if (igstAmt > 0) msg += `IGST (${gstRate}%): +${fmt(igstAmt)}\n`;
           }
-          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && tx?.tax_amount ? (taxableBase + tx.tax_amount) : Math.max(0, subtotal - discountAmt);
+          const grandTotalAmt = hasGst && gstPriceMode === 'exclusive' && totalTax > 0
+            ? (taxableBase + totalTax)
+            : (canonicalDetails?.paid_amount || txAmt || Math.max(0, subtotal - discountAmt));
           msg += `💰 *GRAND TOTAL:* ${fmt(grandTotalAmt)}\n`;
           msg += `----------------------------\n`;
         }

@@ -73,31 +73,38 @@ export const Navigation: React.FC<Props> = ({
   return (
     <>
       {/* 1. MOBILE BOTTOM NAVIGATION BAR (Visible on screens < md) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 z-40 shadow-lg">
-        <div className="flex items-center overflow-x-auto no-scrollbar h-16 max-w-md mx-auto px-1 space-x-0.5">
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => onTabChange(tab.id)}
-                className={`min-w-[52px] flex-1 flex flex-col items-center justify-center py-1 transition-all text-[10px] font-bold shrink-0 ${
-                  isActive
-                    ? 'text-blue-600 dark:text-blue-400 font-black'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
-                }`}
-              >
-                <div
-                  className={`p-1 rounded-xl transition-colors ${
-                    isActive ? 'bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 scale-105' : ''
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 z-40 shadow-lg">
+        <div className="relative max-w-md mx-auto">
+          <div
+            className="flex items-center overflow-x-auto no-scrollbar h-16 px-1 space-x-0.5 scroll-smooth"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
+            {tabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => onTabChange(tab.id)}
+                  className={`min-w-[52px] flex-1 flex flex-col items-center justify-center py-1 transition-all text-[10px] font-bold shrink-0 ${
+                    isActive
+                      ? 'text-blue-600 dark:text-blue-400 font-black'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
                   }`}
                 >
-                  {tab.icon}
-                </div>
-                <span className="mt-0.5 leading-none truncate max-w-[64px] px-0.5">{tab.label}</span>
-              </button>
-            );
-          })}
+                  <div
+                    className={`p-1 rounded-xl transition-colors ${
+                      isActive ? 'bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 scale-105' : ''
+                    }`}
+                  >
+                    {tab.icon}
+                  </div>
+                  <span className="mt-0.5 leading-none truncate max-w-[64px] px-0.5">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {/* Subtle scroll cue fade on right edge for ultra-narrow devices */}
+          <div className="absolute right-0 top-0 bottom-0 w-3 bg-gradient-to-l from-white dark:from-slate-900 to-transparent pointer-events-none" />
         </div>
       </nav>
 

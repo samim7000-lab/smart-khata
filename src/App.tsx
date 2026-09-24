@@ -1045,24 +1045,48 @@ export const App: React.FC = () => {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase
+        let updateRes = await supabase
           .from('shops')
           .update(updatedFields)
           .eq('id', shop.id)
           .select()
-          .single();
+          .maybeSingle();
 
-        if (error) throw error;
-        if (data) {
+        // Schema-adaptive fallback if remote table is missing unmigrated columns (PGRST204 / 42703)
+        if (updateRes.error && (updateRes.error.code === 'PGRST204' || updateRes.error.code === '42703')) {
+          console.warn('[PROFILE] Missing extended columns in shops table. Executing schema-adaptive fallback to core fields...');
+          const coreUpdate: Record<string, any> = {};
+          const knownCoreColumns = [
+            'shop_name', 'owner_name', 'phone', 'whatsapp_number', 'email',
+            'country', 'state', 'city', 'full_address', 'business_type',
+            'currency_code', 'gst_enabled', 'gst_number', 'preferred_language',
+            'logo_url', 'signature_url', 'shop_photo_url'
+          ];
+          for (const key of knownCoreColumns) {
+            if ((updatedFields as any)[key] !== undefined) {
+              coreUpdate[key] = (updatedFields as any)[key];
+            }
+          }
+          updateRes = await supabase
+            .from('shops')
+            .update(coreUpdate)
+            .eq('id', shop.id)
+            .select()
+            .maybeSingle();
+        }
+
+        if (updateRes.error) throw updateRes.error;
+        if (updateRes.data) {
           const finalShop: Shop = {
-            ...data,
+            ...merged, // retain all extended fields locally
+            ...updateRes.data,
             gst_enabled:
-              data.gst_enabled !== undefined && data.gst_enabled !== null
-                ? Boolean(data.gst_enabled)
+              updateRes.data.gst_enabled !== undefined && updateRes.data.gst_enabled !== null
+                ? Boolean(updateRes.data.gst_enabled)
                 : merged.gst_enabled,
-            logo_url: data.logo_url || merged.logo_url,
-            signature_url: data.signature_url || merged.signature_url,
-            shop_photo_url: data.shop_photo_url || merged.shop_photo_url,
+            logo_url: updateRes.data.logo_url || merged.logo_url,
+            signature_url: updateRes.data.signature_url || merged.signature_url,
+            shop_photo_url: updateRes.data.shop_photo_url || merged.shop_photo_url,
           };
           setShop(finalShop);
           saveMockShop(finalShop);

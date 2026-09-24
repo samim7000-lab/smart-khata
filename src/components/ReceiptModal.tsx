@@ -161,14 +161,27 @@ export const ReceiptModal: React.FC<Props> = ({
   const taxableAmt = details?.taxable_amount !== undefined ? details.taxable_amount : Math.max(0, subtotal - discountAmt);
   
   // Tax calculations with split breakdown support
-  const cgstAmt = details?.cgst_amount ?? transaction.cgst_amount ?? 0;
-  const sgstAmt = details?.sgst_amount ?? transaction.sgst_amount ?? 0;
-  const igstAmt = details?.igst_amount ?? transaction.igst_amount ?? 0;
+  let cgstAmt = details?.cgst_amount ?? transaction.cgst_amount ?? 0;
+  let sgstAmt = details?.sgst_amount ?? transaction.sgst_amount ?? 0;
+  let igstAmt = details?.igst_amount ?? transaction.igst_amount ?? 0;
   const totalTax = cgstAmt + sgstAmt + igstAmt || Number(transaction.tax_amount) || 0;
 
   // Requirement #5 & #12: GST must be OPTIONAL. If disabled, do not render GST block!
   const hasGst = Boolean(details?.gst_enabled ?? (shop.gst_enabled && totalTax > 0));
   const gstPriceMode = details?.gst_price_mode || transaction.gst_price_mode || 'exclusive';
+
+  const effectiveGstRate = details?.gst_rate || transaction.gst_rate || (taxableAmt > 0 && totalTax > 0 ? Math.round((totalTax / taxableAmt) * 100) : (shop.default_gst_rate || 18));
+  const halfGstRate = effectiveGstRate / 2;
+
+  // If tax was charged but CGST/SGST/IGST were not individually stored:
+  if (hasGst && totalTax > 0 && cgstAmt === 0 && sgstAmt === 0 && igstAmt === 0) {
+    if (details?.supply_type === 'inter') {
+      igstAmt = totalTax;
+    } else {
+      cgstAmt = Math.round((totalTax / 2) * 100) / 100;
+      sgstAmt = Math.round((totalTax - cgstAmt) * 100) / 100;
+    }
+  }
 
   // Receipt / Invoice Number & Document Type
   const invoiceNumber = details?.invoice_number || details?.receipt_number || `INV-${transaction.id.replace(/\D/g, '').slice(-6) || Date.now().toString().slice(-6)}`;
@@ -354,7 +367,11 @@ export const ReceiptModal: React.FC<Props> = ({
   };
 
   const handlePrint = () => {
-    window.print();
+    try {
+      window.print();
+    } catch (e) {
+      console.warn('[PRINT] window.print failed:', e);
+    }
   };
 
   return (
@@ -461,7 +478,7 @@ export const ReceiptModal: React.FC<Props> = ({
 
           {/* INVOICE META & CUSTOMER DETAILS ORDER */}
           {/* Customer Name -> Customer Address -> Customer Mobile -> GSTIN */}
-          <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs break-words">
             {/* Left Column: Customer Details */}
             <div className="space-y-1">
               <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Customer Details</div>
@@ -500,14 +517,14 @@ export const ReceiptModal: React.FC<Props> = ({
                 </button>
               )}
               {customerGstinStr && (
-                <div className="font-mono text-[11px] text-slate-700 font-bold">
+                <div className="font-mono text-[11px] text-slate-700 font-bold break-all">
                   GSTIN: {customerGstinStr}
                 </div>
               )}
             </div>
 
             {/* Right Column: Invoice Meta */}
-            <div className="text-right space-y-1 divide-y divide-slate-100">
+            <div className="sm:text-right text-left pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/60 space-y-1 divide-y divide-slate-100">
               <div className="pb-1">
                 <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
                   {shop.gst_enabled && documentType === 'tax_invoice'
@@ -516,7 +533,7 @@ export const ReceiptModal: React.FC<Props> = ({
                     ? 'Bill of Supply No'
                     : 'Receipt No'}
                 </div>
-                <div className="font-mono font-black text-blue-600 text-sm">{invoiceNumber}</div>
+                <div className="font-mono font-black text-blue-600 text-sm break-all">{invoiceNumber}</div>
               </div>
               <div className="pt-1">
                 <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Date & Time</div>
@@ -550,28 +567,30 @@ export const ReceiptModal: React.FC<Props> = ({
                 )}
               </div>
 
-              <table className="w-full text-xs text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-300 bg-slate-100 text-slate-700 font-black uppercase text-[10px]">
-                    <th className="py-2 px-2">Item Description</th>
-                    {hasHsnSac && <th className="py-2 px-2 text-center">HSN/SAC</th>}
-                    <th className="py-2 px-2 text-center">Qty</th>
-                    <th className="py-2 px-2 text-right">Unit Price</th>
-                    <th className="py-2 px-2 text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                  {lineItems.map((item, idx) => (
-                    <tr key={item.id || idx}>
-                      <td className="py-2 px-2 font-bold">{item.name}</td>
-                      {hasHsnSac && <td className="py-2 px-2 text-center font-mono text-[10px] text-slate-500">{item.hsn_sac || '-'}</td>}
-                      <td className="py-2 px-2 text-center text-slate-600">{item.quantity}</td>
-                      <td className="py-2 px-2 text-right text-slate-600">{fmt(item.unit_price)}</td>
-                      <td className="py-2 px-2 text-right font-bold text-slate-900">{fmt(item.total)}</td>
+              <div className="overflow-x-auto -mx-1 px-1">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-300 bg-slate-100 text-slate-700 font-black uppercase text-[10px]">
+                      <th className="py-2 px-2">Item Description</th>
+                      {hasHsnSac && <th className="py-2 px-2 text-center">HSN/SAC</th>}
+                      <th className="py-2 px-2 text-center">Qty</th>
+                      <th className="py-2 px-2 text-right">Unit Price</th>
+                      <th className="py-2 px-2 text-right">Amount</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                    {lineItems.map((item, idx) => (
+                      <tr key={item.id || idx}>
+                        <td className="py-2 px-2 font-bold">{item.name}</td>
+                        {hasHsnSac && <td className="py-2 px-2 text-center font-mono text-[10px] text-slate-500">{item.hsn_sac || '-'}</td>}
+                        <td className="py-2 px-2 text-center text-slate-600">{item.quantity}</td>
+                        <td className="py-2 px-2 text-right text-slate-600">{fmt(item.unit_price)}</td>
+                        <td className="py-2 px-2 text-right font-bold text-slate-900">{fmt(item.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -602,30 +621,30 @@ export const ReceiptModal: React.FC<Props> = ({
                   <div className="bg-blue-50/70 p-2.5 rounded-xl space-y-1 text-slate-700 border border-blue-100 text-[11px] font-semibold">
                     <div className="flex justify-between text-blue-900 font-extrabold text-[10px] uppercase">
                       <span>GST Mode: {gstPriceMode === 'inclusive' ? 'Price Includes GST' : 'GST Added to Price'}</span>
-                      <span>Rate: {transaction.gst_rate || 18}%</span>
+                      <span>Rate: {effectiveGstRate}%</span>
                     </div>
 
                     {cgstAmt > 0 && (
                       <div className="flex justify-between">
-                        <span>CGST ({(transaction.gst_rate || 0) / 2}%):</span>
+                        <span>CGST ({halfGstRate}%):</span>
                         <span>+{fmt(cgstAmt)}</span>
                       </div>
                     )}
                     {sgstAmt > 0 && (
                       <div className="flex justify-between">
-                        <span>SGST ({(transaction.gst_rate || 0) / 2}%):</span>
+                        <span>SGST ({halfGstRate}%):</span>
                         <span>+{fmt(sgstAmt)}</span>
                       </div>
                     )}
                     {igstAmt > 0 && (
                       <div className="flex justify-between">
-                        <span>IGST ({transaction.gst_rate || 18}%):</span>
+                        <span>IGST ({effectiveGstRate}%):</span>
                         <span>+{fmt(igstAmt)}</span>
                       </div>
                     )}
                     {cgstAmt === 0 && sgstAmt === 0 && igstAmt === 0 && totalTax > 0 && (
                       <div className="flex justify-between">
-                        <span>GST ({transaction.gst_rate || 18}%):</span>
+                        <span>GST ({effectiveGstRate}%):</span>
                         <span>+{fmt(totalTax)}</span>
                       </div>
                     )}

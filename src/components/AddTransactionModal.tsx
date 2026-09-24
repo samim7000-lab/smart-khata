@@ -107,8 +107,8 @@ export const AddTransactionModal: React.FC<Props> = ({
   const [discountType, setDiscountType] = useState<DiscountType>('fixed');
   const [discountValStr, setDiscountValStr] = useState('');
 
-  // Optional GST Toggle & Price Mode State (Defaults to INCLUSIVE)
-  const [isGstEnabled, setIsGstEnabled] = useState<boolean>(false);
+  // Optional GST Toggle & Price Mode State (Defaults to shop.gst_enabled)
+  const [isGstEnabled, setIsGstEnabled] = useState<boolean>(Boolean(shop.gst_enabled));
   const [gstRate, setGstRate] = useState<number>(shop.default_gst_rate || 18);
   const [gstPriceMode, setGstPriceMode] = useState<GstPriceMode>('inclusive');
 

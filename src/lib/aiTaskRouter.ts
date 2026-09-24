@@ -112,9 +112,52 @@ export function getDeterministicRecoveryAdvice(input: RecoveryAdviceInput): {
 export function getDeterministicCampaignDraft(input: CampaignDraftInput): {
   suggestedMessage: string;
 } {
-  return {
-    suggestedMessage: getCampaignDraft(input.goal, input.language),
-  };
+  const base = getCampaignDraft(input.goal, input.language);
+  const lang = input.language || 'bn';
+  const customOffer = input.customOffer ? input.customOffer.trim() : '';
+  const tone = input.tone || 'warm';
+  const shopName = input.shopName ? input.shopName.trim() : '';
+
+  let message = base;
+  if (shopName) {
+    message = message.replace(/\{\{store_name\}\}/g, shopName);
+  }
+
+  // Interpolate Custom Offer if present
+  if (customOffer) {
+    if (lang === 'bn') {
+      message += `\n\n🎁 বিশেষ অফার: ${customOffer}`;
+    } else if (lang === 'hi') {
+      message += `\n\n🎁 विशेष ऑफर: ${customOffer}`;
+    } else {
+      message += `\n\n🎁 Special Offer: ${customOffer}`;
+    }
+  }
+
+  // Interpolate Tone modifiers
+  if (tone === 'urgent') {
+    if (lang === 'bn') {
+      message += '\n⏰ অফারটি সীমিত সময়ের জন্য! জলদি আসুন।';
+    } else if (lang === 'hi') {
+      message += '\n⏰ ऑफर सीमित समय के लिए है! जल्द पधारें।';
+    } else {
+      message += '\n⏰ Hurry, limited time offer! Visit soon.';
+    }
+  } else if (tone === 'promotional') {
+    if (lang === 'bn') {
+      message += '\n🏷️ সেরা ডিল ও ডিসকাউন্ট পেতে আজই যোগাযোগ করুন!';
+    } else if (lang === 'hi') {
+      message += '\n🏷️ सबसे बेहतरीन डील्स और डिस्काउंट के लिए आज ही संपर्क करें!';
+    } else {
+      message += '\n🏷️ Visit today for the best deals and savings!';
+    }
+  }
+
+  if (shopName && !message.includes(shopName)) {
+    message += `\n— ${shopName}`;
+  }
+
+  return { suggestedMessage: message };
 }
 
 /**
