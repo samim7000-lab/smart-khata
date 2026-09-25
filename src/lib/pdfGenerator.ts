@@ -1,7 +1,7 @@
 import { Customer, Shop, Transaction } from '../types';
 import { translations } from '../i18n/translations';
 import { formatShopCurrency } from './countryPricing';
-import { unpackReceiptNote, calculatePreviousBalance, getCleanTransactionNote } from './receiptUtils';
+import { unpackReceiptNote, calculatePreviousBalance, getCleanTransactionNote, getCanonicalReceiptDetails } from './receiptUtils';
 
 /**
  * Execute print via a clean, hidden in-page iframe.
@@ -71,7 +71,8 @@ export const printTransactionReceiptPDF = (
     { hour: '2-digit', minute: '2-digit' }
   );
 
-  const { noteText, details } = unpackReceiptNote(tx);
+  const { noteText } = unpackReceiptNote(tx);
+  const details = getCanonicalReceiptDetails(tx, customer, shop);
   const mode = details?.mode || (isCredit ? 'credit_sale' : 'due_payment');
 
   let typeLabel = '';

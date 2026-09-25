@@ -1303,6 +1303,7 @@ export const App: React.FC = () => {
             type,
             amount,
             note: packedNote,
+            receipt_details: receiptDetails || null,
             ...txGstPayload,
           };
 
@@ -1361,6 +1362,7 @@ export const App: React.FC = () => {
                 type,
                 amount,
                 note: packedNote,
+                receipt_details: receiptDetails || null,
               };
               if (ledgerPhotoUrl && ledgerPhotoUrl.trim()) {
                 corePayload.ledger_photo_url = ledgerPhotoUrl.trim();
@@ -1857,7 +1859,11 @@ export const App: React.FC = () => {
                   });
                 }}
                 onUpdateCustomer={(updated) => {
-                  setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+                  setCustomers((prev) => {
+                    const next = prev.map((c) => (c.id === updated.id ? updated : c));
+                    saveMockCustomers(next);
+                    return next;
+                  });
                   setSelectedCustomer(updated);
                 }}
               />

@@ -6,10 +6,16 @@ import { formatShopCurrency } from './countryPricing';
  */
 export function cleanNoteString(rawNote?: string): string {
   if (!rawNote) return '';
+  const tagIdx = rawNote.search(/\[\s*RECEIPT_JSON:/i);
+  if (tagIdx !== -1) {
+    return rawNote.substring(0, tagIdx).trim();
+  }
+  const trimmed = rawNote.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    return '';
+  }
   return rawNote
-    .replace(/\[\s*RECEIPT_JSON:[\s\S]*?\]/gi, '')
-    .replace(/\[?\s*RECEIPT_JSON:[\s\S]*$/gi, '')
-    .replace(/\{"mode":[\s\S]*?\}/gi, '')
+    .replace(/\{"mode":[\s\S]*$/gi, '')
     .trim();
 }
 
@@ -38,28 +44,26 @@ export function unpackReceiptNote(tx: Transaction): { noteText: string; details:
     };
   }
 
-  const rawNote = tx.note || '';
-  const match = rawNote.match(/\[\s*RECEIPT_JSON:([\s\S]+?)\]/i) || rawNote.match(/\[?\s*RECEIPT_JSON:([\s\S]+)/i);
-  if (match && match[1]) {
+  const rawNote = (tx.note || '').trim();
+  const tagMatch = rawNote.match(/\[\s*RECEIPT_JSON:([\s\S]+)/i) || rawNote.match(/\[\s*RECEIPT_JSON:([\s\S]+?)\]/i);
+  if (tagMatch && tagMatch[1]) {
+    let jsonCandidate = tagMatch[1].trim();
+    const lastBracket = jsonCandidate.lastIndexOf(']');
+    if (lastBracket !== -1) {
+      jsonCandidate = jsonCandidate.substring(0, lastBracket).trim();
+    }
+    jsonCandidate = jsonCandidate.replace(/\]+$/, '').trim();
     try {
-      let jsonCandidate = match[1].trim();
-      if (jsonCandidate.endsWith(']') && !jsonCandidate.startsWith('[')) {
-        jsonCandidate = jsonCandidate.replace(/\]+$/, '').trim();
-      }
       const parsed: ReceiptDetailsPayload = JSON.parse(jsonCandidate);
       return { noteText, details: parsed };
     } catch (e) {
       console.warn('Failed to parse receipt details JSON from note tag:', e);
     }
-  } else {
-    // Attempt parsing rawNote if it looks like raw JSON
-    const trimmed = rawNote.trim();
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-      try {
-        const parsed: ReceiptDetailsPayload = JSON.parse(trimmed);
-        return { noteText, details: parsed };
-      } catch {}
-    }
+  } else if (rawNote.startsWith('{') && rawNote.endsWith('}')) {
+    try {
+      const parsed: ReceiptDetailsPayload = JSON.parse(rawNote);
+      return { noteText, details: parsed };
+    } catch {}
   }
 
   return { noteText, details: null };
@@ -87,11 +91,12 @@ export function getCanonicalReceiptDetails(
   }
 
   const isCredit = tx.type === 'credit_given';
-  const isPurePayment = tx.type === 'payment_received';
   const txAmt = Number(tx.amount) || 0;
-  const hasTax = Boolean(tx.tax_amount && tx.tax_amount > 0);
-  const isGstEnabled = Boolean(hasTax || (shop && shop.gst_enabled));
   const totalTax = tx.tax_amount || 0;
+  const hasTax = Boolean(totalTax > 0 || (tx.base_amount && tx.base_amount > 0));
+  const isGstEnabled = Boolean(hasTax || (shop && shop.gst_enabled));
+  // A taxable payment_received is a Cash Sale (Tax Invoice), NOT a debt clearance voucher
+  const isPurePayment = tx.type === 'payment_received' && !hasTax;
   const calcCgst = tx.cgst_amount || (totalTax > 0 ? Math.round((totalTax / 2) * 100) / 100 : 0);
   const calcSgst = tx.sgst_amount || (totalTax > 0 ? Math.round((totalTax - calcCgst) * 100) / 100 : 0);
   const effectiveRate = tx.gst_rate || (tx.base_amount && totalTax > 0 ? Math.round((totalTax / tx.base_amount) * 100) : (shop?.default_gst_rate || 18));
@@ -102,12 +107,14 @@ export function getCanonicalReceiptDetails(
       ? (shop?.gst_registration_type === 'composition' ? 'bill_of_supply' : 'tax_invoice')
       : 'receipt';
 
+  const mode = isPurePayment ? 'due_payment' : (isCredit ? 'credit_sale' : 'cash_sale');
+
   return {
-    mode: isPurePayment ? 'due_payment' : (isCredit ? 'credit_sale' : 'cash_sale'),
+    mode,
     items: [
       {
         id: 'canonical-item',
-        name: noteText || (isCredit ? 'General Goods Purchase' : 'Payment Clearance'),
+        name: noteText || (isCredit ? 'General Goods Purchase' : (hasTax ? 'General Goods Purchase' : 'Payment Clearance')),
         quantity: 1,
         unit_price: tx.base_amount || txAmt,
         total: txAmt,

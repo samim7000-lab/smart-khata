@@ -2,9 +2,9 @@ import { COUNTRIES } from '../data/countries';
 import { Customer, Language, Shop, Transaction, ReceiptDetailsPayload } from '../types';
 import { formatShopCurrency } from './countryPricing';
 import { MetaCloudApiService } from './metaCloudApi';
-import { EMIInstallmentDB, EMIAccountDB } from './emiService';
 import { replaceMessageVariables } from './communicationEngine';
-import { unpackReceiptNote, getCanonicalReceiptDetails } from './receiptUtils';
+import { unpackReceiptNote, getCanonicalReceiptDetails, cleanNoteString } from './receiptUtils';
+import { EMIInstallmentDB, EMIAccountDB } from './emiService';
 
 export type WhatsAppMessageType =
   | 'RECEIPT'
@@ -160,7 +160,7 @@ export function buildWhatsAppMessage(options: WhatsAppMessageOptions): string {
       const tx = options.transaction;
       const details = options.receiptDetails !== undefined
         ? options.receiptDetails
-        : (tx ? unpackReceiptNote(tx).details : null);
+        : (tx ? getCanonicalReceiptDetails(tx, customer, shop) : null);
 
       const receiptNo = details?.receipt_number || (tx ? `INV-${tx.id.replace(/\D/g, '').slice(-6) || tx.id.slice(-6).toUpperCase()}` : `INV-${Date.now().toString().slice(-6)}`);
       
@@ -240,7 +240,7 @@ export function buildWhatsAppMessage(options: WhatsAppMessageOptions): string {
       const paymentMethod = details?.payment_method;
 
       // Unpack note
-      const noteText = (tx ? unpackReceiptNote(tx).noteText : (details?.notes || '')).trim();
+      const noteText = cleanNoteString(tx ? unpackReceiptNote(tx).noteText : (details?.notes || ''));
 
       const fmt = (amt: number) => formatShopCurrency(amt, shop.country, shop.currency_code);
 
